@@ -75,6 +75,13 @@ should rest on it alone.
 | `sms_cost_paise` | `15` (₹0.15) | `TODO(sumit)` — published transactional SMS / DLT pricing | `assumption` |
 | `voice_call_cost_paise` | `120` (₹1.20) | `TODO(sumit)` — published outbound IVR or agent-call pricing | `assumption` |
 | `churn_probability_increment_per_contact` | `0.015` | no public source — author's assumption (the cost of nagging a customer is not something merchants publish) | `assumption` |
+| `bank_tier_mix` | `large_private 0.45`, `psu 0.40`, `small_finance 0.15` | `TODO(sumit)` — RBI/NPCI bank-wise account or UPI volume share, narrowed to the segment modelled | `assumption` |
+| `monthly_salary_paise_median` | `3_500_000` (₹35,000/month) | `TODO(sumit)` — PLFS or EPFO wage distribution for the salaried segment | `assumption` |
+| `monthly_salary_lognormal_sigma` | `0.55` | `TODO(sumit)` — derive from two published wage percentiles, then re-mark as `derived` | `assumption` |
+| `monthly_spend_share_of_salary` | `0.75` | `TODO(sumit)` — household consumption survey (MPCE) against the same wage segment | `assumption` |
+| `initial_churn_intent_alpha` | `1.5` | no public source — author's assumption (churn intent is unobservable; shape puts most customers near zero) | `assumption` |
+| `initial_churn_intent_beta` | `28.5` | no public source — author's assumption (paired with alpha for a mean of 0.05) | `assumption` |
+| `per_txn_limit_paise_by_tier` | `large_private 10_000_000`, `psu 10_000_000`, `small_finance 5_000_000` | `TODO(sumit)` — NPCI UPI transaction-limit circulars plus per-bank mandate limits | `assumption` |
 
 The `source` strings in `calibration.py` are authoritative; the column above is
 abbreviated for reading. `tests/test_calibration.py` asserts that every
@@ -101,6 +108,15 @@ to sum to 1.0 over days 1–7 and 25–31 only. The shape encodes month-end and
 first-week clustering. It is an assumption about payroll timing, and it is one
 of the parameters most worth sweeping: the whole premise that retry *timing*
 matters depends on salary credits being predictable.
+
+**The population parameters describe who the customers are.**
+`bank_tier_mix`, the two salary parameters, `monthly_spend_share_of_salary`,
+the two churn-intent Beta shapes and `per_txn_limit_paise_by_tier` are what
+the simulator samples a population from. They live in `CalibrationSet` rather
+than inside the simulator so that they are captured in a stored experiment
+config and swept with everything else. Salary is lognormal with the stated
+median; daily spend is derived from salary rather than drawn independently,
+so a customer's outgoings track their income.
 
 **`card_penetration_rate` bounds the `SwitchRail` action.** A policy cannot
 move a customer to card if the customer has no usable card, so this parameter

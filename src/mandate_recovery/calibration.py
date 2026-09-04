@@ -83,6 +83,18 @@ FAILURE_SHARE_FIELDS: Final = (
 
 _TOLERANCE: Final = 1e-9
 
+#: Parameters that are genuinely not probabilities and so are exempt from the
+#: [0, 1] check. Listed explicitly rather than guessed from the name, because
+#: a distribution shape parameter reads like a rate and is not one.
+_UNBOUNDED_PARAMETERS: Final = frozenset(
+    {
+        "restricted_window_hours",
+        "monthly_salary_lognormal_sigma",
+        "initial_churn_intent_alpha",
+        "initial_churn_intent_beta",
+    }
+)
+
 
 # --------------------------------------------------------------------------
 # CalibratedValue
@@ -275,6 +287,62 @@ class CalibrationSet(BaseModel):
         "the cost of nagging a customer is not something merchants publish",
     )
 
+    # -- Population shape (who the customers are) --------------------------
+    # These describe the population the simulator generates. They live here,
+    # not in the simulator, so that they are captured in a stored experiment
+    # config and swept along with everything else.
+    bank_tier_mix: CalibratedValue[dict[BankTier, float]] = _placeholder(
+        {
+            BankTier.LARGE_PRIVATE: 0.45,
+            BankTier.PSU: 0.40,
+            BankTier.SMALL_FINANCE: 0.15,
+        },
+        "fraction of customers banking with each tier",
+        "RBI / NPCI bank-wise account or UPI volume share, narrowed to the "
+        "customer segment this experiment models",
+    )
+    monthly_salary_paise_median: CalibratedValue[
+        NonNegativePaise
+    ] = _placeholder(
+        3_500_000,
+        "paise per month, median of the salary distribution",
+        "PLFS or EPFO wage distribution for the salaried segment",
+    )
+    monthly_salary_lognormal_sigma: CalibratedValue[float] = _placeholder(
+        0.55,
+        "sigma of log salary (dimensionless)",
+        "derive from two published wage percentiles; record the calculation "
+        "and re-mark this parameter as derived",
+    )
+    monthly_spend_share_of_salary: CalibratedValue[float] = _placeholder(
+        0.75,
+        "fraction of monthly salary spent over the month",
+        "household consumption survey (MPCE) against the same wage segment",
+    )
+    initial_churn_intent_alpha: CalibratedValue[float] = _assumption(
+        1.5,
+        "alpha of the Beta prior on initial churn intent",
+        "churn intent is not observable, so no public figure can exist; "
+        "alpha/beta chosen to put most customers near zero intent",
+    )
+    initial_churn_intent_beta: CalibratedValue[float] = _assumption(
+        28.5,
+        "beta of the Beta prior on initial churn intent",
+        "paired with initial_churn_intent_alpha for a mean of 0.05",
+    )
+    per_txn_limit_paise_by_tier: CalibratedValue[
+        dict[BankTier, NonNegativePaise]
+    ] = _placeholder(
+        {
+            BankTier.LARGE_PRIVATE: 10_000_000,
+            BankTier.PSU: 10_000_000,
+            BankTier.SMALL_FINANCE: 5_000_000,
+        },
+        "paise, per-transaction ceiling for a recurring debit",
+        "NPCI UPI transaction-limit circulars plus per-bank published "
+        "mandate limits",
+    )
+
     # ----------------------------------------------------------------------
     # Cross-parameter validation
     # ----------------------------------------------------------------------
@@ -303,6 +371,38 @@ class CalibrationSet(BaseModel):
             raise ValueError(
                 f"salary_credit_day_distribution must sum to 1.0, got {total!r}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _check_bank_tier_mix(self) -> CalibrationSet:
+        mix = self.bank_tier_mix.value
+        missing = set(BankTier) - set(mix)
+        if missing:
+            raise ValueError(
+                f"bank_tier_mix is missing tiers: "
+                f"{sorted(t.value for t in missing)}"
+            )
+        total = sum(mix.values())
+        if not math.isclose(total, 1.0, abs_tol=_TOLERANCE):
+            raise ValueError(f"bank_tier_mix must sum to 1.0, got {total!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _check_per_txn_limits_complete(self) -> CalibrationSet:
+        missing = set(BankTier) - set(self.per_txn_limit_paise_by_tier.value)
+        if missing:
+            raise ValueError(
+                f"per_txn_limit_paise_by_tier is missing tiers: "
+                f"{sorted(t.value for t in missing)}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_beta_shape_is_positive(self) -> CalibrationSet:
+        for name in ("initial_churn_intent_alpha", "initial_churn_intent_beta"):
+            shape = getattr(self, name).value
+            if shape <= 0.0:
+                raise ValueError(f"{name} must be > 0, got {shape!r}")
         return self
 
     @model_validator(mode="after")
@@ -338,10 +438,11 @@ class CalibrationSet(BaseModel):
 def _probability_like(name: str, value: Any) -> list[tuple[str, float]]:
     """Numbers on this parameter that must lie in [0, 1].
 
-    Costs are paise and unbounded; the window is clock hours. Everything else
-    named as a rate, share, probability or distribution weight is bounded.
+    Costs are paise and unbounded, as are the parameters named in
+    _UNBOUNDED_PARAMETERS. Everything else named as a rate, share, probability
+    or distribution weight is bounded.
     """
-    if name.endswith("_paise") or name == "restricted_window_hours":
+    if "paise" in name or name in _UNBOUNDED_PARAMETERS:
         return []
     if isinstance(value, dict):
         return [(f"{name}[{key!r}]", number) for key, number in value.items()]

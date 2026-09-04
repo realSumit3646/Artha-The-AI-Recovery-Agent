@@ -184,3 +184,80 @@ were checked the same way.
   after that, changing these numbers means re-running all arms.
 - The commit message in the task was truncated mid-word ("explicit ass");
   completed to "explicit assumptions".
+
+---
+
+## Commit 4 — Latent world: customers, balances, banks, calendar
+
+**Done:** `src/mandate_recovery/sim/` now holds `World`, the simulator's
+private ground truth. It samples a population of `LatentCustomerState` from
+the calibrated distributions, assigns each customer a bank tier, evolves
+balances day by day (salary credited at the start of the day, then spend,
+floored at zero), answers `bank_available(bank_id, day, hour)` and
+`in_restricted_window(hour)`, and steps forward with `advance_day()`. The
+class docstring states in full that the object is simulator-private and must
+never reach a policy. `tests/sim/test_world.py` adds 20 tests; suite is 66
+green.
+
+All three required properties were mutation-checked: sampling from an
+unseeded generator fails the identical-trajectory tests, removing the zero
+floor fails the negative-balance test, and shifting the salary-day comparison
+by one fails both salary-timing tests.
+
+**Decisions:**
+- **Calibration was extended by 7 parameters, with approval, because
+  `CalibrationSet` could feed only one of `LatentCustomerState`'s six
+  fields.** Added `bank_tier_mix`, `monthly_salary_paise_median`,
+  `monthly_salary_lognormal_sigma`, `monthly_spend_share_of_salary`,
+  `initial_churn_intent_alpha`, `initial_churn_intent_beta` and
+  `per_txn_limit_paise_by_tier` — seven rather than the six estimated, since
+  a Beta prior needs two shape parameters. All are marked `assumption` with
+  `TODO(sumit)` or no-public-source strings, like every other parameter.
+  `docs/CALIBRATION.md` gained matching rows; `tests/test_calibration.py`
+  needed no change and now validates the new parameters automatically.
+- Population parameters live in `CalibrationSet`, not in the simulator, so
+  they land in a stored experiment config and are swept at commit 27. Putting
+  them in `world.py` would have quietly exempted them from both.
+- **Bank availability is pre-drawn for the whole run** at construction, and
+  `bank_available` is a lookup. Sampling per call would make the answer
+  depend on how often it was asked, so a policy that retried more would
+  silently shift the bank's uptime — a leak dressed as noise.
+- **One representative bank per tier**, with `bank_id` equal to the tier's
+  value. Several banks per tier would need a bank count, and there is no
+  calibrated figure for one.
+- **The month is a uniform 31 days**, so simulation day `d` is day-of-month
+  `(d % 31) + 1`. The calibrated salary distribution puts mass on days 25–31;
+  a real calendar would fold that mass onto shorter months and distort the
+  very timing effect the experiment is about.
+- Balances are held as a numpy `int64` array and `LatentCustomerState` is
+  built on demand. Copying a frozen model per customer per day would be
+  millions of allocations in a full run, for no gain.
+- **Opening balances are wound forward from each customer's last salary
+  credit**, rather than everyone starting at a full salary. A population in
+  lockstep on day 0 would make the first cycle unrepresentative.
+- Daily spend is derived from salary (`share / 31`) rather than drawn
+  independently, so outgoings track income instead of pairing rich customers
+  with poor spending at random.
+- `__init__` rejects anything that is not a `numpy.random.Generator`,
+  including a legacy `RandomState`, which makes invariant 5 a runtime error
+  rather than a convention.
+- `_probability_like` in `calibration.py` previously guessed which parameters
+  were probabilities from their names. Shape parameters like
+  `monthly_salary_lognormal_sigma` read like rates and are not, so exemptions
+  are now an explicit `_UNBOUNDED_PARAMETERS` set.
+
+**Open:**
+- `test_balances_never_go_negative` is close to vacuous under the default
+  calibration: salary far exceeds spend, so no balance approaches zero. The
+  floor is really enforced by
+  `test_balances_never_go_negative_when_spending_outruns_income`, which
+  drives spend to 20x salary. Keep both; the weak one only becomes meaningful
+  once debits start drawing balances down.
+- No mandates, attempts or outcomes yet — `World` is the stage, not the play.
+  Nothing yet consumes `upi_autopay_execution_failure_rate`, the failure
+  shares, `restricted_window_rejection_probability`, the revocation rate,
+  `card_penetration_rate` or any cost parameter.
+- The uniform 31-day month is a simplification worth revisiting only if a
+  result turns out to depend on it.
+- Commit 8 freezes the simulator. Calibration and world dynamics should be
+  settled before then.
