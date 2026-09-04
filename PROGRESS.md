@@ -930,3 +930,43 @@ tests; suite is 338 green.
   currently untested against real pressure.
 - Nothing populates the three new observation fields yet, and nothing calls
   the validator in a run. Both land with the heuristic agent at commit 19.
+
+---
+
+## Commit 18 — Decision audit trail
+
+**Done:** `agent/audit.py` records every decision with the observation it was
+made on (fingerprint plus key fields), the diagnosis, the proposed action, the
+decision source, the rationale, the validator's verdict, what actually
+executed, the outcome and the running cost. `to_dataframe()` gives the tabular
+form; `to_human_readable(mandate_id)` renders one mandate's whole story as
+text. `tests/agent/test_audit.py` adds 19 tests; suite is 357 green.
+
+**Decisions:**
+- **Entries are stamped with simulation day and hour, never wall-clock time.**
+  A trail carrying `datetime.now()` could not be reproduced from a stored
+  config, and invariant 4 says every experiment must be. The real clock is the
+  one thing about a run that cannot be replayed. A test asserts no wall-clock
+  field exists.
+- **`record()` raises on a blank rationale.** An action nobody can explain is
+  an action that should not have been taken, so the log refuses to hold one
+  rather than storing an empty string and hoping someone notices.
+- The rendered trail shows *both* the proposed and the executed action when
+  they differ, and prints REFUSED in capitals with the rule that fired. The
+  place a reader most needs the truth is exactly where a policy was overruled.
+- Rupees, not paise, in the rendered output — and a test asserts the raw paise
+  integer does not appear. Nobody reads paise off a screen.
+- Rationales and validator reasons are wrapped to stay inside a terminal. This
+  output is meant to be screen-recorded; a line that wraps at the terminal
+  edge is a line that reads badly on video.
+- The observation fingerprint is a 16-character SHA256 prefix, so two
+  decisions can be confirmed to have seen identical inputs without storing the
+  whole object on every row.
+
+**Open:**
+- Nothing writes to the log during a run yet. Wiring it into the harness lands
+  with the heuristic agent at commit 19, and the API endpoint that serves it
+  at commit 28.
+- The trail is per-run and in memory. A 120-seed x 500-mandate run produces
+  hundreds of thousands of decisions; if that becomes a problem it should be
+  written incrementally rather than held.

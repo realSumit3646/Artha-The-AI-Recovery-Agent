@@ -6,6 +6,7 @@ reproducible from a stored config. The model layer, when it arrives, proposes
 into these components rather than replacing them.
 """
 
+from .audit import AuditEntry, AuditLog, observation_fingerprint
 from .validator import (
     Budget,
     ComplianceLimits,
@@ -21,6 +22,9 @@ from .scheduler import (
 )
 
 __all__ = [
+    "AuditEntry",
+    "AuditLog",
+    "observation_fingerprint",
     "Budget",
     "ComplianceLimits",
     "ValidationResult",
