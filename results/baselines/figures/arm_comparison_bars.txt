@@ -1,0 +1,1 @@
+Net recovery by arm with bootstrap 95% confidence intervals on the paired per-seed delta against the no-intervention floor. Intervals come from resampling seeds, not episodes: episodes inside a seed share a world and are not independent.

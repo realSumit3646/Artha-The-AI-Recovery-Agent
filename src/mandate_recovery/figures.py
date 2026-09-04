@@ -38,6 +38,9 @@ __all__ = [
     "failure_rate_by_hour",
     "balance_trajectory_sample",
     "observed_vs_calibrated",
+    "recovery_bounds",
+    "arm_comparison_bars",
+    "paired_delta_distribution",
 ]
 
 
@@ -283,6 +286,193 @@ def observed_vs_calibrated(
     axes.set_ylabel("Share of attempts / of failures")
     axes.set_title("Observed distributions against their calibrated targets")
     axes.yaxis.set_major_formatter(lambda y, _: f"{y:.0%}")
+    axes.legend()
+    axes.grid(axis="x", visible=False)
+    return figure
+
+
+# --------------------------------------------------------------------------
+# Experiment figures
+# --------------------------------------------------------------------------
+
+#: Stable colour per arm, so an arm looks the same in every figure.
+ARM_COLOURS: Final[Mapping[str, str]] = {
+    "do_nothing": PALETTE[7],
+    "fixed_schedule": PALETTE[1],
+    "heuristic": PALETTE[2],
+    "llm_agent": PALETTE[0],
+    "oracle": PALETTE[4],
+}
+
+ARM_LABELS: Final[Mapping[str, str]] = {
+    "do_nothing": "No intervention",
+    "fixed_schedule": "Fixed schedule",
+    "heuristic": "Heuristic agent",
+    "llm_agent": "LLM agent",
+    "oracle": "Oracle (perfect info)",
+}
+
+
+def _arm_label(arm: str) -> str:
+    return ARM_LABELS.get(arm, arm.replace("_", " ").title())
+
+
+def _arm_colour(arm: str) -> str:
+    return ARM_COLOURS.get(arm, PALETTE[5])
+
+
+def recovery_bounds(
+    net_recovery_paise_by_arm: Mapping[str, float],
+    *,
+    floor_arm: str = "do_nothing",
+    ceiling_arm: str = "oracle",
+    baseline_arm: str = "fixed_schedule",
+) -> plt.Figure:
+    """Floor, baseline and ceiling, with the headroom between them named.
+
+    The figure that frames the whole project: it says how much of the lost
+    money is recoverable at all, and how much of that the industry default
+    already gets.
+    """
+    order = [
+        arm
+        for arm in (floor_arm, baseline_arm, ceiling_arm)
+        if arm in net_recovery_paise_by_arm
+    ]
+    order += [arm for arm in net_recovery_paise_by_arm if arm not in order]
+    values = [net_recovery_paise_by_arm[arm] / 10_000_000 for arm in order]
+
+    figure, axes = plt.subplots(figsize=(9.0, 4.6))
+    bars = axes.barh(
+        [_arm_label(arm) for arm in order],
+        values,
+        color=[_arm_colour(arm) for arm in order],
+        height=0.6,
+    )
+    for bar, value in zip(bars, values):
+        axes.text(
+            value + max(values) * 0.012,
+            bar.get_y() + bar.get_height() / 2,
+            f"Rs {value:,.1f}L",
+            va="center",
+            fontsize=11,
+        )
+
+    if baseline_arm in net_recovery_paise_by_arm and (
+        ceiling_arm in net_recovery_paise_by_arm
+    ):
+        baseline = net_recovery_paise_by_arm[baseline_arm] / 10_000_000
+        ceiling = net_recovery_paise_by_arm[ceiling_arm] / 10_000_000
+        # Sit the arrow between the two bars it describes, not above them.
+        span_y = (order.index(baseline_arm) + order.index(ceiling_arm)) / 2.0
+        axes.annotate(
+            "",
+            xy=(ceiling, span_y),
+            xytext=(baseline, span_y),
+            arrowprops=dict(arrowstyle="<->", color=_INK, linewidth=1.6),
+        )
+        axes.text(
+            (baseline + ceiling) / 2,
+            span_y + 0.17,
+            f"headroom Rs {ceiling - baseline:,.1f}L",
+            ha="center",
+            fontsize=11,
+            color=_INK,
+        )
+
+    axes.set_xlabel("Net recovery (lakh rupees, summed across seeds)")
+    axes.set_title("How much of the lost money is recoverable at all")
+    axes.set_xlim(0, max(values) * 1.20)
+    axes.grid(axis="y", visible=False)
+    return figure
+
+
+def arm_comparison_bars(
+    net_recovery_paise_by_arm: Mapping[str, float],
+    comparisons: Mapping[str, Mapping[str, float]] | None = None,
+) -> plt.Figure:
+    """Net recovery by arm, with bootstrap CIs on the paired deltas."""
+    arms = list(net_recovery_paise_by_arm)
+    values = [net_recovery_paise_by_arm[arm] / 10_000_000 for arm in arms]
+
+    figure, axes = plt.subplots()
+    bars = axes.bar(
+        [_arm_label(arm) for arm in arms],
+        values,
+        color=[_arm_colour(arm) for arm in arms],
+        width=0.6,
+    )
+
+    if comparisons:
+        for bar, arm in zip(bars, arms):
+            comparison = comparisons.get(arm)
+            if not comparison:
+                continue
+            low = comparison["ci_low_paise"] / 10_000_000
+            high = comparison["ci_high_paise"] / 10_000_000
+            axes.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() * 0.5,
+                "\n".join(
+                    [
+                        "vs baseline",
+                        "95% CI",
+                        f"{low:+,.1f}L to {high:+,.1f}L",
+                    ]
+                ),
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="white",
+            )
+
+    axes.set_ylabel("Net recovery (lakh rupees)")
+    axes.set_title("Net recovery by arm")
+    axes.grid(axis="x", visible=False)
+    plt.setp(axes.get_xticklabels(), rotation=12, ha="right")
+    return figure
+
+
+def paired_delta_distribution(
+    deltas_paise: Sequence[float],
+    *,
+    treatment: str = "treatment",
+    control: str = "control",
+) -> plt.Figure:
+    """Per-seed deltas, with the losing seeds shown rather than averaged away.
+
+    The mean is one number; this is the shape behind it. Seeds below zero are
+    coloured separately because that is the loss rate made visible.
+    """
+    deltas = np.asarray(list(deltas_paise), dtype=float) / 100_000.0
+    losses = deltas < 0
+
+    figure, axes = plt.subplots()
+    axes.hist(
+        deltas[~losses],
+        bins=24,
+        color=PALETTE[2],
+        label=f"won ({(~losses).sum()} seeds)",
+    )
+    if losses.any():
+        axes.hist(
+            deltas[losses],
+            bins=12,
+            color=PALETTE[3],
+            label=f"lost ({losses.sum()} seeds)",
+        )
+    axes.axvline(0, color=_MUTED, linewidth=1.2)
+    axes.axvline(
+        deltas.mean(),
+        color=_INK,
+        linestyle="--",
+        linewidth=1.6,
+        label=f"mean {deltas.mean():+,.0f}k",
+    )
+
+    axes.set_xlabel("Per-seed net recovery delta (thousand rupees)")
+    axes.set_ylabel("Seeds")
+    axes.set_title(f"{_arm_label(treatment)} minus {_arm_label(control)}, by seed")
     axes.legend()
     axes.grid(axis="x", visible=False)
     return figure

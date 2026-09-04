@@ -1,0 +1,1 @@
+Per-seed net recovery delta, fixed schedule minus no intervention. The fixed schedule lost on 0 of 120 seeds (0.0%). The mean is one number; this is the shape behind it, and the losing seeds are shown rather than averaged away.

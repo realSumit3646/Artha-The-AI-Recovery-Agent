@@ -769,3 +769,69 @@ interval-width tests.
   inflates the chance one looks good by luck; the loss rate partly covers
   this, but the ablation at commit 26 should state how many comparisons were
   run.
+
+---
+
+## Commit 15 — Baseline experiment, 120 seeds, bounds established
+
+**Done:** `scripts/run_baselines.py` runs the three non-AI arms across 120
+paired seeds x 500 mandates x 90 days in ~34 seconds, and writes
+`results/baselines/` with config, metrics, both parquet tables and three
+figures. README now carries a Results section with the bounds figure and the
+headroom stated in numbers. Suite is 269 green.
+
+**The first real numbers:**
+
+| Arm | Net recovery | Recovery rate | Attempts/recovery | Cost per Rs 100 |
+| --- | ---: | ---: | ---: | ---: |
+| do_nothing | Rs 11,866 L | 73.1% | 1.37 | 0.029 |
+| fixed_schedule | Rs 13,641 L | 81.3% | 2.06 | 0.043 |
+| oracle | Rs 15,409 L | 84.8% | 1.38 | 0.026 |
+
+Headroom above the fixed schedule is **Rs 1,768 lakh**; the fixed schedule
+captures **50.1%** of what is available above doing nothing. All three
+comparisons lost on **0 of 120 seeds**.
+
+**Decisions:**
+- `figures.py` gained `recovery_bounds`, `arm_comparison_bars` and
+  `paired_delta_distribution`, outside the task's file list. The project
+  convention set at commit 7 is that figure functions live in the shared
+  module with consistent style; putting them in the script would have split
+  the styling.
+- The three comparisons are declared as a `COMPARISONS` constant and their
+  count is written into `metrics.json`. Stating up front how many comparisons
+  were run is what stops a later reader wondering how many were tried.
+- The bootstrap seed is a module constant, so a published interval is
+  reproducible rather than merely reproducible-in-principle.
+- The headroom annotation on the bounds figure was repositioned after
+  inspecting the render: it originally collided with the title.
+
+**Open:**
+- **Intervention costs barely bite.** At 0.043 rupees per Rs 100 recovered,
+  gateway fees are ~0.04% of a mandate's value, so nothing in the cost model
+  currently discourages retrying. That is realistic — real gateway fees are
+  small — but it means "retry forever" is not stopped by economics. It will be
+  stopped by the compliance validator at commit 17, and the write-up should
+  say so rather than implying the cost model does the work.
+- Over-intervention is 0.0% across every arm because no arm contacts anyone.
+  The metric is structurally correct but untested against a policy that
+  actually nudges; the heuristic agent at commit 19 is the first real exercise
+  of it.
+- The oracle bounds timing only. It is a ceiling on retiming, not on recovery,
+  and the README says so — but if the LLM agent ever exceeds it, that is a
+  finding about persuasion, not a bug.
+- Loss rate is 0/120 everywhere, which makes it uninformative so far. It will
+  start earning its place once arms are close.
+
+---
+
+### Milestone 2 complete — first real numbers
+
+Cost model, policy interface with a type-enforced boundary, three non-AI arms,
+a paired experiment harness, paired metrics with bootstrap CIs and loss rate,
+and a 120-seed baseline run with figures. 269 tests green.
+
+Carried into milestone 3: the harness forfeits a cycle on `SendNudge` and must
+support nudge-then-retry before commit 19; the freeze still excludes the
+fitted mandate parameters; and every calibrated number remains an unsourced
+placeholder, so no figure here is quotable as a claim about the world.
