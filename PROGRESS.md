@@ -970,3 +970,54 @@ text. `tests/agent/test_audit.py` adds 19 tests; suite is 357 green.
 - The trail is per-run and in memory. A 120-seed x 500-mandate run produces
   hundreds of thousands of decisions; if that becomes a problem it should be
   written incrementally rather than held.
+
+---
+
+## Commit 19 — Deterministic heuristic agent
+
+**Done:** `policies/heuristic.py` runs diagnose (rules) -> select (decision
+table) -> schedule -> validate. Diagnosis is a code-book lookup plus the two
+disambiguation rules for the contradiction case, returning `UNKNOWN` rather
+than guessing, and exposing `unknown_diagnosis_rate`.
+`tests/policies/test_heuristic.py` adds 32 tests; suite is 392 green.
+
+**Decisions:**
+- **The commit 13 blocker is fixed.** `runner.py` no longer forfeits a cycle
+  on `SendNudge`: a nudge asks the customer to fund the account, so the debit
+  is re-presented `nudge_followup_days` later. Without this the heuristic
+  would have been crippled by the harness rather than by its own decisions,
+  and the ablation would have measured the bug.
+- **Milestone 2's numbers were re-verified after the harness changes and
+  reproduce to the paise** — do_nothing 118,661,910,531, fixed_schedule
+  136,410,729,005, oracle 154,091,675,537, all identical to the stored run.
+  Card ownership is drawn on a dedicated `[seed, 5]` stream precisely so that
+  adding it could not perturb any pre-existing sequence.
+- The two contradiction rules are asymmetric on purpose. If the customer has
+  previously paid **at or above** this amount, their ceiling permits it and a
+  funds code is trusted. If the largest amount they have ever paid is
+  **below** it, a limit breach would look identical, so the answer is
+  `UNKNOWN` rather than a coin flip. That second rule is the only handle on
+  the miscoded-limit case from commit 6.
+- The agent keeps its own code book and imports nothing from
+  `mandate_recovery.sim`. It does read the calibrated **cost** figures, which
+  is legitimate — a merchant knows their own gateway fees — but nothing about
+  failure rates, balances or the customer.
+- Contact is not the first move: two silent retries must fail first, the
+  customer must not have been contacted, and more than two days must remain in
+  the cycle. Nudging early would buy recovery with churn.
+- `EscalateHuman` is deliberately unused. Every trigger I could write for it
+  needed an invented disputable threshold, and the action remains available
+  for the LLM arm.
+- **Two test bugs found and fixed:** the import check matched the module
+  docstring's own mention of the simulator, so it now reads the AST; and a
+  lapse assertion checked the wrong string.
+
+**Open:**
+- The heuristic's UNKNOWN rate under a real run is not yet measured — that is
+  commit 20, and it is the number that justifies the LLM stage.
+- `nudge_followup_days = 1` is a harness convention, not a policy choice. A
+  policy cannot yet say *when* to follow up a nudge, because `SendNudge`
+  carries no timing. If the LLM arm wants to control that, the action needs a
+  field.
+- The decision table thresholds (two retries before contact, two days before
+  lapse) are unswept assumptions like everything else.

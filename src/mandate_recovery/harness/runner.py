@@ -108,6 +108,11 @@ class ExperimentConfig:
     #: The hour a mandate is first presented on its due day.
     default_presentment_hour: int = 9
 
+    #: Days after a nudge that the debit is re-presented. A nudge asks the
+    #: customer to fund the account; without a follow-up debit it collects
+    #: nothing, so the harness schedules one rather than forfeiting the cycle.
+    nudge_followup_days: int = 1
+
     def to_dict(self) -> dict[str, Any]:
         import json
 
@@ -120,6 +125,7 @@ class ExperimentConfig:
             "mandate_amount_paise_median": self.mandate_amount_paise_median,
             "mandate_amount_lognormal_sigma": self.mandate_amount_lognormal_sigma,
             "default_presentment_hour": self.default_presentment_hour,
+            "nudge_followup_days": self.nudge_followup_days,
             "assumed_mandate_lifetime_cycles": ASSUMED_MANDATE_LIFETIME_CYCLES,
             "calibration": json.loads(self.calibration.model_dump_json()),
         }
@@ -192,8 +198,11 @@ class _MandateState:
     successes: int = 0
     failures: int = 0
     contacts: int = 0
+    contact_days: list[int] = field(default_factory=list)
     last_contact_day: int | None = None
     max_success_amount_paise: int = 0
+    successful_days_of_month: list[int] = field(default_factory=list)
+    has_card_on_file: bool = False
     all_outcomes: list[str] = field(default_factory=list)
     all_codes: list[str] = field(default_factory=list)
 
@@ -204,7 +213,7 @@ class _MandateState:
 
 
 def build_observation(
-    mandate: Mandate, state: _MandateState, day: int
+    mandate: Mandate, state: _MandateState, day: int, hour: int = 9
 ) -> Observation:
     """Assemble the policy's view. Nothing latent may enter here.
 
@@ -217,14 +226,20 @@ def build_observation(
         amount_paise=mandate.amount_paise,
         due_day=mandate.day_of_month,
         current_day=day,
+        current_hour=hour,
         attempt_history=tuple(state.cycle_history),
         contacts_sent=state.contacts,
+        contacts_in_last_7_days=sum(
+            1 for contact_day in state.contact_days if day - contact_day < 7
+        ),
         days_since_last_contact=(
             None if state.last_contact_day is None else day - state.last_contact_day
         ),
+        has_card_on_file=state.has_card_on_file,
         historical_success_count=state.successes,
         historical_failure_count=state.failures,
         max_historical_success_amount_paise=state.max_success_amount_paise,
+        successful_days_of_month=tuple(sorted(set(state.successful_days_of_month))),
     )
 
 
@@ -306,7 +321,15 @@ def _run_arm(
         )
         for mandate in mandates
     }
-    states = {mandate.id: _MandateState() for mandate in mandates}
+    # A dedicated stream: adding this must not perturb any pre-existing
+    # sequence, or every result recorded before it would silently change.
+    card_rng = np.random.default_rng([seed, 5])
+    card_rate = config.calibration.card_penetration_rate.value
+    has_card = card_rng.random(len(mandates)) < card_rate
+    states = {
+        mandate.id: _MandateState(has_card_on_file=bool(has_card[index]))
+        for index, mandate in enumerate(mandates)
+    }
     decisions: list[DecisionRecord] = []
     funds_failures: dict[str, int] = {}
 
@@ -362,6 +385,7 @@ def _run_arm(
                 state.max_success_amount_paise = max(
                     state.max_success_amount_paise, mandate.amount_paise
                 )
+                state.successful_days_of_month.append(world.day_of_month)
                 if (
                     record.days_to_recovery is None
                     and state.cycle_first_failure_day is not None
@@ -378,7 +402,9 @@ def _run_arm(
                 funds_failures[mandate.id] = funds_failures.get(mandate.id, 0) + 1
 
             # A failure is the only place a policy gets to act.
-            decision = policy.decide(build_observation(mandate, state, day))
+            decision = policy.decide(
+                build_observation(mandate, state, day, hour)
+            )
             record.decisions += 1
             action = decision.action
 
@@ -442,15 +468,27 @@ def _apply(
     if isinstance(action, SendNudge):
         record.sms_sent += 1
         state.contacts += 1
+        state.contact_days.append(day)
         state.last_contact_day = day
-        # A nudge does not itself re-present the debit. The cycle closes
-        # here; nudge-then-retry needs harness support, see PROGRESS.md.
-        state.cycle_open = False
+        # A nudge asks the customer to fund the account. Without a follow-up
+        # debit it collects nothing, so the harness re-presents rather than
+        # forfeiting the cycle -- otherwise any policy that nudges would be
+        # crippled by the harness rather than by its own decisions.
+        target_day = day + config.nudge_followup_days
+        if target_day < config.n_days:
+            state.scheduled = (
+                target_day,
+                config.default_presentment_hour,
+                Rail.UPI_AUTOPAY,
+            )
+        else:
+            state.cycle_open = False
         return
 
     if isinstance(action, EscalateHuman):
         record.escalated_to_human = True
         state.contacts += 1
+        state.contact_days.append(day)
         state.last_contact_day = day
         state.cycle_open = False
         return

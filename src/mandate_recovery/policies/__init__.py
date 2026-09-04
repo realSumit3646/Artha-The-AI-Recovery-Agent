@@ -8,6 +8,7 @@ boundary test walks.
 from .base import POLICY_REGISTRY, Policy
 from .do_nothing import DoNothingPolicy
 from .fixed_schedule import FixedSchedulePolicy
+from .heuristic import HeuristicPolicy
 from .oracle import OraclePolicy
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "Policy",
     "DoNothingPolicy",
     "FixedSchedulePolicy",
+    "HeuristicPolicy",
     "OraclePolicy",
 ]

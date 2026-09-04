@@ -175,7 +175,12 @@ def test_the_agents_code_book_matches_the_simulators_vocabulary():
 
 
 def test_the_agent_module_does_not_import_the_simulator():
-    """Beliefs must not be ground truth smuggled in through an import."""
+    """Beliefs must not be ground truth smuggled in through an import.
+
+    Read from the AST rather than the text: the module docstring mentions the
+    simulator by name, and a substring search would flag it.
+    """
+    import ast
     from pathlib import Path
 
     source = (
@@ -185,9 +190,15 @@ def test_the_agent_module_does_not_import_the_simulator():
         / "agent"
         / "scheduler.py"
     ).read_text(encoding="utf-8")
-    assert "from ..sim" not in source
-    assert "mandate_recovery.sim" not in source
-    assert "calibration" not in source.split('"""')[2]  # not in the code body
+    modules: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            modules.add(("." * node.level) + (node.module or ""))
+
+    assert not any("sim" in module.split(".") for module in modules), modules
+    assert not any("calibration" in module for module in modules), modules
 
 
 def test_bank_priors_are_beliefs_not_the_calibrated_truth():
