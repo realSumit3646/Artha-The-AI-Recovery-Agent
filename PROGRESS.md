@@ -722,3 +722,50 @@ predicts — do_nothing < fixed_schedule < oracle on net recovery.
   modelling a reduced amount or a card rail. Neither is used by any arm yet.
 - One mandate per customer in practice. The runner supports more, but
   `remaining_cycles` and the oracle both assume otherwise.
+
+---
+
+## Commit 14 — Metrics and paired arm comparison
+
+**Done:** `harness/metrics.py` gives `compute_metrics` (recovery rate,
+recovered and net paise, attempts and contacts per recovery, median and p90
+days to recovery, over-intervention rate, cost per Rs 100 recovered) and
+`compare_arms`, which returns per-seed paired deltas, the mean delta with a
+bootstrap 95% CI, and `loss_rate`. `tests/harness/test_metrics.py` adds 23
+tests; suite is 269 green.
+
+Mutation-checked: deriving `loss_rate` from the sign of the mean fails two
+tests, and collapsing the bootstrap to a point estimate fails the
+interval-width tests.
+
+**Decisions:**
+- **The bootstrap resamples per-seed deltas, not episodes.** Episodes inside a
+  seed share a world, a bank and a calendar, so they are not independent;
+  resampling them would produce an interval far too narrow and a result that
+  looked much more certain than it is.
+- **`loss_rate` is computed from the seeds themselves, never inferred from the
+  mean.** A test pins the case that matters: an arm winning by Rs 100,000 on
+  average while losing on half the seeds must still report a 50% loss rate.
+  `summarise_comparison` puts the loss rate in the same sentence as the mean,
+  so the two cannot be separated when quoted.
+- `compare_arms` refuses arms run on different seed sets rather than silently
+  comparing the overlap — an unpaired comparison dressed as a paired one is
+  exactly the failure this design exists to prevent.
+- `recovery_rate` is per **billing cycle**, not per mandate. A mandate that
+  runs three cycles and is collected twice recovered two thirds of what it was
+  owed; the mandate-level view would score that as a full success.
+- Undefined ratios return `None`, not infinity or zero. An arm that recovered
+  nothing has no meaningful attempts-per-recovery, and reporting `0.0` there
+  would flatter it.
+- The bootstrap takes an explicit generator, per the determinism invariant, so
+  a published interval is reproducible from the run config.
+
+**Open:**
+- The CI is a percentile bootstrap, which is fine for a mean of paired deltas
+  but has no bias correction. With 120 seeds that is not worth fixing; if a
+  headline claim ever rests on a marginal interval, say so rather than
+  switching estimator after seeing the result.
+- No multiple-comparison adjustment. Comparing four arms against one control
+  inflates the chance one looks good by luck; the loss rate partly covers
+  this, but the ablation at commit 26 should state how many comparisons were
+  run.
