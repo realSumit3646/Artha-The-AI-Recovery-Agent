@@ -286,7 +286,38 @@ class Validator:
             )
 
         hour = observation.current_hour
-        if not limits.earliest_contact_hour <= hour < limits.latest_contact_hour:
+        if isinstance(action, SendNudge) and action.send_hour is not None:
+            hour = action.send_hour
+
+        if hour < limits.earliest_contact_hour:
+            # Too early is a queuing question, not a violation: a collector
+            # that notices a failure at 05:00 sends the message at 09:00. Only
+            # nudges can be deferred -- an escalation is a person picking up a
+            # phone, and there is nothing to queue.
+            if not isinstance(action, SendNudge):
+                return self._refuse(
+                    "outside_contact_hours",
+                    action,
+                    f"It is {hour:02d}:00, before contact is permitted at "
+                    f"{limits.earliest_contact_hour:02d}:00.",
+                )
+            self._substitutions["contact_deferred"] += 1
+            deferred = action.model_copy(
+                update={"send_hour": limits.earliest_contact_hour}
+            )
+            return ValidationResult(
+                approved=True,
+                reason=(
+                    f"Contact deferred from {hour:02d}:00 to "
+                    f"{limits.earliest_contact_hour:02d}:00, the first hour "
+                    "customers may be contacted."
+                ),
+                action=deferred,
+                substituted_action=deferred,
+                rule="contact_deferred",
+            )
+
+        if hour >= limits.latest_contact_hour:
             return self._refuse(
                 "outside_contact_hours",
                 action,

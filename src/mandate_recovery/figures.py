@@ -41,6 +41,8 @@ __all__ = [
     "recovery_bounds",
     "arm_comparison_bars",
     "paired_delta_distribution",
+    "diagnosis_coverage",
+    "intervention_mix",
 ]
 
 
@@ -474,5 +476,99 @@ def paired_delta_distribution(
     axes.set_ylabel("Seeds")
     axes.set_title(f"{_arm_label(treatment)} minus {_arm_label(control)}, by seed")
     axes.legend()
+    axes.grid(axis="x", visible=False)
+    return figure
+
+
+DIAGNOSIS_COLOURS: Final[Mapping[str, str]] = {
+    "INSUFFICIENT_FUNDS": PALETTE[0],
+    "TECHNICAL": PALETTE[1],
+    "LIMIT": PALETTE[2],
+    "WINDOW": PALETTE[3],
+    "REVOKED": PALETTE[5],
+    "UNKNOWN": PALETTE[7],
+}
+
+ACTION_COLOURS: Final[Mapping[str, str]] = {
+    "retry_silent": PALETTE[0],
+    "send_nudge": PALETTE[1],
+    "collect_partial": PALETTE[2],
+    "switch_rail": PALETTE[5],
+    "escalate_human": PALETTE[4],
+    "stop": PALETTE[7],
+}
+
+
+def diagnosis_coverage(counts: Mapping[str, int]) -> plt.Figure:
+    """How many failures the code book resolved, and how many it could not.
+
+    The UNKNOWN share is the argument for a model stage, so it is drawn last,
+    in grey, and labelled with its percentage rather than left to be eyeballed.
+    """
+    total = sum(counts.values()) or 1
+    resolved = {k: v for k, v in counts.items() if k != "UNKNOWN"}
+    ordered = sorted(resolved.items(), key=lambda item: item[1])
+    ordered.append(("UNKNOWN", counts.get("UNKNOWN", 0)))
+
+    labels = [name.replace("_", " ").title() for name, _ in ordered]
+    values = [count / total for _, count in ordered]
+    colours = [DIAGNOSIS_COLOURS.get(name, PALETTE[7]) for name, _ in ordered]
+
+    figure, axes = plt.subplots(figsize=(9.0, 4.8))
+    bars = axes.barh(labels, values, color=colours, height=0.62)
+    for bar, value in zip(bars, values):
+        axes.text(
+            value + max(values) * 0.015,
+            bar.get_y() + bar.get_height() / 2,
+            f"{value:.1%}",
+            va="center",
+            fontsize=11,
+        )
+
+    unknown_share = counts.get("UNKNOWN", 0) / total
+    axes.set_xlabel("Share of diagnosed failures")
+    axes.set_title(
+        f"A code book resolves {1 - unknown_share:.0%} of failures"
+    )
+    axes.set_xlim(0, max(values) * 1.18)
+    axes.xaxis.set_major_formatter(lambda x, _: f"{x:.0%}")
+    axes.grid(axis="y", visible=False)
+    return figure
+
+
+def intervention_mix(counts_by_arm: Mapping[str, Mapping[str, int]]) -> plt.Figure:
+    """What each arm actually did, as a share of its decisions."""
+    arms = list(counts_by_arm)
+    kinds: list[str] = []
+    for counts in counts_by_arm.values():
+        for kind in counts:
+            if kind not in kinds:
+                kinds.append(kind)
+    kinds.sort(key=lambda k: -sum(c.get(k, 0) for c in counts_by_arm.values()))
+
+    figure, axes = plt.subplots(figsize=(9.0, 4.8))
+    bottoms = np.zeros(len(arms))
+    for kind in kinds:
+        shares = []
+        for arm in arms:
+            counts = counts_by_arm[arm]
+            total = sum(counts.values()) or 1
+            shares.append(counts.get(kind, 0) / total)
+        shares_array = np.asarray(shares)
+        axes.bar(
+            [_arm_label(arm) for arm in arms],
+            shares_array,
+            bottom=bottoms,
+            color=ACTION_COLOURS.get(kind, PALETTE[6]),
+            label=kind.replace("_", " "),
+            width=0.55,
+        )
+        bottoms += shares_array
+
+    axes.set_ylabel("Share of decisions")
+    axes.set_title("What each arm actually did")
+    axes.set_ylim(0, 1)
+    axes.yaxis.set_major_formatter(lambda y, _: f"{y:.0%}")
+    axes.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3)
     axes.grid(axis="x", visible=False)
     return figure

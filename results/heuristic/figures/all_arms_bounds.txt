@@ -1,0 +1,1 @@
+Net recovery across four arms on identical worlds. The heuristic agent sits between the industry baseline and the perfect-information ceiling; the remaining gap is what a model stage would have to earn.

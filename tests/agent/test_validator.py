@@ -169,11 +169,44 @@ def test_a_contact_below_the_cap_is_allowed():
     assert validate(_nudge(), observation).approved is True
 
 
-@pytest.mark.parametrize("hour", [0, 5, 8, 21, 22, 23])
-def test_contact_outside_permitted_hours_is_refused(hour):
+@pytest.mark.parametrize("hour", [21, 22, 23])
+def test_contact_after_permitted_hours_is_refused(hour):
+    """Too late is a violation: the day is gone, there is nothing to queue."""
     result = validate(_nudge(), _observation(current_hour=hour))
     assert result.approved is False
     assert result.rule == "outside_contact_hours"
+
+
+@pytest.mark.parametrize("hour", [0, 5, 8])
+def test_a_nudge_decided_too_early_is_deferred_not_refused(hour):
+    """Too early is a queuing question, not a violation.
+
+    A collector that notices a failure at 05:00 does not wake the customer; it
+    sends the message at 09:00. Refusing here killed the entire contact path
+    in the first heuristic run — 20,366 nudges rejected, zero contacts made.
+    """
+    validator = Validator()
+    result = validator.validate(_nudge(), _observation(current_hour=hour))
+
+    assert result.approved is True
+    assert result.action.send_hour == LIMITS.earliest_contact_hour
+    assert result.rule == "contact_deferred"
+    assert validator.substitutions["contact_deferred"] == 1
+
+
+def test_an_escalation_is_never_deferred():
+    """A human agent picking up a phone is not a queued message."""
+    result = validate(EscalateHuman(reason="repeat failure"), _observation(current_hour=5))
+    assert result.approved is False
+    assert result.rule == "outside_contact_hours"
+
+
+def test_an_explicit_send_hour_is_validated_rather_than_the_decision_hour():
+    late = SendNudge(channel=NudgeChannel.SMS, tone_level=1, send_hour=22)
+    assert validate(late, _observation(current_hour=10)).approved is False
+
+    fine = SendNudge(channel=NudgeChannel.SMS, tone_level=1, send_hour=10)
+    assert validate(fine, _observation(current_hour=5)).approved is True
 
 
 @pytest.mark.parametrize("hour", [9, 12, 15, 20])
@@ -271,6 +304,7 @@ def test_a_violating_action_is_never_returned_for_execution():
         (_retry(day=30, hour=11), _observation()),
         (_retry(day=30, hour=18), _observation()),
         (_nudge(), _observation(current_hour=3)),
+        (_nudge(), _observation(current_hour=22)),
         (_nudge(), _observation(contacts_in_last_7_days=99)),
         (_retry(day=30), _observation(attempt_history=_history(99))),
         (EscalateHuman(reason="now"), _observation(current_hour=2)),
@@ -283,9 +317,14 @@ def test_a_violating_action_is_never_returned_for_execution():
         if isinstance(executed, RetrySilent):
             assert not LIMITS.is_restricted(executed.scheduled_hour)
         if isinstance(executed, (SendNudge, EscalateHuman)):
+            # The hour that matters is when it is *sent*, not when it was
+            # decided; a deferred nudge carries its own send hour.
+            effective = getattr(executed, "send_hour", None)
+            if effective is None:
+                effective = observation.current_hour
             assert (
                 LIMITS.earliest_contact_hour
-                <= observation.current_hour
+                <= effective
                 < LIMITS.latest_contact_hour
             )
             assert (
@@ -296,7 +335,7 @@ def test_a_violating_action_is_never_returned_for_execution():
 
 def test_repeating_a_refused_action_never_wears_the_gate_down():
     validator = Validator()
-    observation = _observation(current_hour=3)
+    observation = _observation(current_hour=22)
     for _ in range(50):
         assert validator.validate(_nudge(), observation).approved is False
     assert validator.rejections["outside_contact_hours"] == 50
@@ -318,7 +357,7 @@ def test_stopping_is_always_permitted():
 
 def test_every_rejection_is_counted_by_reason():
     validator = Validator()
-    validator.validate(_nudge(), _observation(current_hour=2))
+    validator.validate(_nudge(), _observation(current_hour=22))
     validator.validate(_nudge(), _observation(contacts_in_last_7_days=99))
     validator.validate(_retry(), _observation(attempt_history=_history(99)))
 
@@ -333,7 +372,7 @@ def test_every_rejection_is_counted_by_reason():
 def test_counters_start_empty_and_can_be_reset():
     validator = Validator()
     assert validator.rejections == {}
-    validator.validate(_nudge(), _observation(current_hour=2))
+    validator.validate(_nudge(), _observation(current_hour=22))
     assert validator.total_rejections == 1
     validator.reset()
     assert validator.total_rejections == 0
@@ -346,7 +385,7 @@ def test_limits_are_configurable():
 
 
 def test_the_result_reports_which_rule_fired():
-    result = validate(_nudge(), _observation(current_hour=2))
+    result = validate(_nudge(), _observation(current_hour=22))
     assert isinstance(result, ValidationResult)
     assert result.rule == "outside_contact_hours"
     assert "09:00" in result.reason

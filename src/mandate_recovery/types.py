@@ -284,11 +284,18 @@ class RetrySilent(_FrozenModel):
 
 
 class SendNudge(_FrozenModel):
-    """Contact the customer. ``tone_level`` rises with insistence."""
+    """Contact the customer. ``tone_level`` rises with insistence.
+
+    ``send_hour`` separates *deciding* to contact from *sending*. A collector
+    that notices a failure at 05:00 does not wake the customer; it queues the
+    message for business hours. ``None`` means "as soon as permitted", which
+    the compliance validator resolves to a concrete hour.
+    """
 
     kind: Literal["send_nudge"] = "send_nudge"
     channel: NudgeChannel
     tone_level: Annotated[int, Field(strict=True, ge=1)]
+    send_hour: Optional[Annotated[int, Field(strict=True, ge=0, le=23)]] = None
 
 
 class CollectPartial(_FrozenModel):

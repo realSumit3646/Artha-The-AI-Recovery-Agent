@@ -1,0 +1,1 @@
+Per-seed net recovery delta, heuristic agent minus fixed schedule, across 120 paired seeds. The agent lost on 63 of 120 seeds (52.5%). Losing seeds are shown rather than averaged away.

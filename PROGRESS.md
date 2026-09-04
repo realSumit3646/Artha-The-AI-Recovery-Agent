@@ -1021,3 +1021,85 @@ than guessing, and exposing `unknown_diagnosis_rate`.
   field.
 - The decision table thresholds (two retries before contact, two days before
   lapse) are unswept assumptions like everything else.
+
+---
+
+## Commit 20 — Heuristic experiment, 120 seeds
+
+**Done:** `scripts/run_heuristic.py` runs all four non-LLM arms on the same
+120 seeds as commit 15 and writes `results/heuristic/` with config, metrics,
+both parquet tables and four figures. README Results updated with the
+heuristic's position and the UNKNOWN rate. Suite is 394 green.
+
+| Arm | Net | Recovery | Att/rec | Contacts/rec | Over-int | Headroom |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| do_nothing | Rs 11,866 L | 73.1% | 1.37 | 0.000 | 0.0% | 0% |
+| fixed_schedule | Rs 13,641 L | 81.3% | 2.06 | 0.000 | 0.0% | 50.1% |
+| heuristic | Rs 13,623 L | 82.4% | 1.78 | 0.082 | 8.4% | 49.6% |
+| oracle | Rs 15,409 L | 84.8% | 1.38 | 0.000 | 0.0% | 100% |
+
+**The heuristic does not beat the fixed schedule.** Mean delta Rs -15,265
+(95% CI Rs -52,047 to +22,500), lost on **63 of 120 seeds (52.5%)**. UNKNOWN
+diagnosis rate: **23.0%** over 112,063 failures.
+
+**A defect the experiment found, and the fix:**
+The first run showed `contacts_per_recovery = 0.000` and 20,366 validator
+refusals for `outside_contact_hours`. The contact path was **entirely dead**:
+the scheduler retries at 04:00-06:00 to catch balances before the day's
+spending, so every nudge decision happened outside the 09:00-21:00 window and
+was refused. A real collector that notices a failure at 05:00 does not wake
+the customer — it queues the message for business hours. `SendNudge` now
+carries `send_hour`, and the validator **defers** an early nudge rather than
+refusing it, consistent with the existing rule that timing errors are
+corrected and substantive violations are refused. An escalation is never
+deferred: a human picking up a phone is not a queued message.
+
+**Both measurements are recorded, because the fix changed the answer:**
+
+| Heuristic | Net | vs baseline | Loss rate |
+| --- | ---: | ---: | ---: |
+| contact path dead (first run) | Rs 14,011.5 L | +Rs 308,679 | 4.2% |
+| contact path working (reported) | Rs 13,622.8 L | -Rs 15,265 | 52.5% |
+
+**Decisions:**
+- **The losing result is reported as measured. It was not tuned away.** I
+  could have made the contact rule cost-aware until the number went green;
+  that is exactly the search this project exists not to do. The mechanism is
+  understood and written down instead.
+- Why contact loses: a nudge raises churn probability by the calibrated
+  increment, which on an Rs 8,800 mandate with ~9 cycles left costs about
+  Rs 1,188 in expected lifetime value — 13.5% of the mandate — to buy roughly
+  one percentage point of recovery. It also **displaces a salary-timed retry**
+  with an untimed follow-up at the default hour, so the agent pays the churn
+  and forfeits its main edge at the same time.
+- Over-intervention is finally a live measurement rather than a structural
+  zero: 8.4% of the heuristic's episodes contacted someone the paired
+  counterfactual shows would have paid anyway.
+
+**Open:**
+- **The nudge follow-up ignores the scheduler.** `nudge_followup_days` puts
+  the retry a fixed day later at the default presentment hour, discarding the
+  slot the scheduler would have chosen. This is the single biggest reason the
+  contact path loses money, and it is a harness limitation rather than a
+  policy choice. **Fix before commit 26**, or the ablation will measure the
+  harness rather than the agent.
+- The contact rule is not cost-aware. A competent agent would weigh the churn
+  cost it can compute against the amount at stake. Doing that is legitimate
+  and should happen — but as a stated design change with both numbers
+  reported, exactly as above, never as a quiet retune after seeing the result.
+- 16,026 `attempt_cap_reached` refusals means the compliance cap now binds
+  hard on the heuristic. Worth checking whether the cap or the agent is the
+  limiting factor before the ablation.
+
+---
+
+### Milestone 3 complete
+
+Scheduler, compliance validator, audit trail, deterministic agent, and a
+120-seed experiment. 394 tests green.
+
+The headline finding is not the one the plan expected: **the deterministic
+agent ties the industry baseline rather than beating it**, because the cost of
+contacting customers eats the value of better timing. The 23.0% UNKNOWN
+diagnosis rate is the argument for the LLM stage; the contact economics are
+the argument against using it to talk to people. Both go into the ablation.

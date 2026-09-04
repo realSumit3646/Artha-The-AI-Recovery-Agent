@@ -1,0 +1,1 @@
+The share of each arm's decisions by action type. The fixed schedule can only retry or stop; the heuristic agent also collects partial amounts against a known ceiling and contacts the customer when silent retries have failed.
