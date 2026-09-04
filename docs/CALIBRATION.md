@@ -67,7 +67,7 @@ should rest on it alone.
 | `share_of_failures_window_rejected` | `0.10` | `TODO(sumit)` — gateway or issuer decline-reason breakdown for recurring debits | `assumption` |
 | `restricted_window_hours` | `((10, 13), (17, 21))` | `TODO(sumit)` — NPCI circular on processing windows for recurring e-mandates; confirm exact peak hours and circular number | `assumption` |
 | `restricted_window_rejection_probability` | `0.35` | no public source — author's assumption (NPCI deprioritises recurring debits at peak but publishes no rejection rate) | `assumption` |
-| `bank_availability_by_tier` | `large_private 0.985`, `psu 0.950`, `small_finance 0.920` | `TODO(sumit)` — NPCI publishes bank-wise UPI technical decline rates monthly; aggregate into these three tiers and cite the period | `assumption` |
+| `bank_availability_by_tier` | `large_private 0.955`, `psu 0.910`, `small_finance 0.865` | `TODO(sumit)` — NPCI publishes bank-wise UPI technical decline rates monthly; aggregate into these three tiers and cite the period. **Fitted**, see below | `assumption` |
 | `monthly_mandate_revocation_rate` | `0.02` | no public source — author's assumption (revocation is a customer action merchants report privately, if at all) | `assumption` |
 | `salary_credit_day_distribution` | 14 days, mass on 1–7 and 25–31, peaking on day 1 (`0.18`) and day 30 (`0.13`) | no public source — author's assumption (no public dataset of Indian payroll credit dates) | `assumption` |
 | `card_penetration_rate` | `0.25` | `TODO(sumit)` — RBI monthly card statistics, bounded to the customer segment modelled here | `assumption` |
@@ -87,6 +87,49 @@ The `source` strings in `calibration.py` are authoritative; the column above is
 abbreviated for reading. `tests/test_calibration.py` asserts that every
 parameter appears in this table and that the confidence column matches the
 code, so the two cannot silently diverge.
+
+## Fitting: which numbers were chosen to match which
+
+`scripts/validate_simulator.py` runs the null world — no policy, every mandate
+presented once per cycle — and `tests/sim/test_distributions.py` asserts the
+emergent failure mix lands within 2 points of the calibrated failure rate and
+3 points of each calibrated mode share. Those tests pass. They did not pass by
+accident, and it matters which way the fitting ran.
+
+**Treated as targets** (the mechanics were made to match them): the overall
+failure rate and the four `share_of_failures_*` values. These are the figures
+most likely to be replaced by real published data, so they are the ones the
+simulator should be answerable to.
+
+**Fitted to hit those targets**:
+
+| Quantity | Where it lives | Value | Why it absorbs the fit |
+| --- | --- | --- | --- |
+| Mandate amount distribution | `scripts/validate_simulator.py` | lognormal, median `880_000` paise, σ `1.20` | The distribution of mandate amounts in a particular merchant's book is not something any public source will ever settle |
+| Share of attempts presented inside the restricted window | `scripts/validate_simulator.py` | `0.086` | Presentment timing is a merchant's own operational choice |
+| `bank_availability_by_tier` | `calibration.py` | `0.955 / 0.910 / 0.865` | See below — this one is uncomfortable |
+
+### The availability change, stated plainly
+
+The original placeholders (`0.985 / 0.950 / 0.920`) implied a weighted
+availability of 0.961, and therefore a technical-decline rate of 3.9% of
+attempts. The calibrated failure mix demands 7.5%. The two placeholder sets
+were written at different times and simply disagreed; there is no reading of
+them under which both are true.
+
+Bank availability is the one fitted quantity that a public source *could*
+settle, since NPCI publishes bank-wise technical decline rates. Adjusting it
+to fit is therefore the weakest link in this file. It was adjusted rather than
+the failure mix because a published overall failure rate is easier to find and
+harder to argue with than a defensible three-tier aggregation of per-bank
+decline data. **When the real NPCI figures go in, this is the parameter to
+replace first, and the failure-mode shares should then be re-derived from it
+rather than the other way round.**
+
+Both values remain `assumption`. Neither is empirical. Making two placeholders
+agree with each other is not evidence that either is correct — it only means
+the simulator is now internally consistent, which is the most this project
+claims.
 
 ## Notes on individual parameters
 

@@ -1,0 +1,1 @@
+Six customer balance trajectories over 90 simulated days. The sawtooth is the salary cycle: a debit presented two days before payday fails where the identical debit two days later succeeds. The policy never sees these curves.

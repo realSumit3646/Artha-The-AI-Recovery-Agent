@@ -1,0 +1,1 @@
+Failure modes across 21,161 failed attempts in 50 seeded runs with no recovery policy. Insufficient funds dominates, which is why retry timing rather than retry volume is the lever this project tests.

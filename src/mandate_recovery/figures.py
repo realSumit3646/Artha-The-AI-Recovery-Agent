@@ -1,0 +1,288 @@
+"""Shared plotting for every figure this project produces.
+
+One style, applied at import, so figures from different scripts sit together
+without looking like they came from different projects. Every figure is saved
+three ways by :func:`save_figure`: a 300-dpi PNG, an SVG, and a ``.txt``
+caption alongside them. The captions are written to be reused verbatim in the
+README and the pitch video, so they say what the figure shows and what to
+conclude, not "Figure 3".
+
+Design rules, enforced by habit rather than by code:
+
+* No chartjunk. No gridlines competing with the data, no 3-D, no shadows.
+* Readable at video resolution -- large type, few series, direct labels where
+  they fit.
+* Colourblind-safe throughout: the palette is Okabe-Ito, which stays legible
+  under deuteranopia and protanopia and survives greyscale printing.
+* Every axis carries units. A number without a unit is not a result.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Final, Iterable, Mapping, Sequence
+
+import matplotlib
+
+matplotlib.use("Agg")  # figures are files, never windows
+
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+
+__all__ = [
+    "PALETTE",
+    "OUTCOME_COLOURS",
+    "set_style",
+    "save_figure",
+    "failure_mode_breakdown",
+    "failure_rate_by_hour",
+    "balance_trajectory_sample",
+    "observed_vs_calibrated",
+]
+
+
+#: Okabe-Ito: eight hues distinguishable under the common colour vision
+#: deficiencies, and distinguishable from each other in greyscale.
+PALETTE: Final[tuple[str, ...]] = (
+    "#0072B2",  # blue
+    "#E69F00",  # orange
+    "#009E73",  # green
+    "#D55E00",  # vermillion
+    "#CC79A7",  # reddish purple
+    "#56B4E9",  # sky blue
+    "#F0E442",  # yellow
+    "#999999",  # grey
+)
+
+#: Stable colour per failure mode, so the same cause is the same colour in
+#: every figure in the project.
+OUTCOME_COLOURS: Final[Mapping[str, str]] = {
+    "INSUFFICIENT_FUNDS": PALETTE[0],
+    "TECHNICAL_DECLINE": PALETTE[1],
+    "LIMIT_EXCEEDED": PALETTE[2],
+    "WINDOW_REJECTED": PALETTE[3],
+    "MANDATE_REVOKED": PALETTE[7],
+    "SUCCESS": PALETTE[5],
+}
+
+_INK: Final = "#222222"
+_MUTED: Final = "#666666"
+
+
+def set_style() -> None:
+    """Apply the project style. Called once at import."""
+    plt.rcParams.update(
+        {
+            "figure.figsize": (9.0, 5.5),
+            "figure.dpi": 110,
+            "savefig.bbox": "tight",
+            "savefig.facecolor": "white",
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "font.size": 12,
+            "axes.titlesize": 15,
+            "axes.titleweight": "bold",
+            "axes.labelsize": 12,
+            "axes.labelcolor": _INK,
+            "axes.edgecolor": _MUTED,
+            "axes.linewidth": 0.8,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.grid": True,
+            "axes.axisbelow": True,
+            "grid.color": "#E6E6E6",
+            "grid.linewidth": 0.8,
+            "xtick.color": _INK,
+            "ytick.color": _INK,
+            "xtick.direction": "out",
+            "ytick.direction": "out",
+            "legend.frameon": False,
+            "legend.fontsize": 11,
+            "lines.linewidth": 2.0,
+            "text.color": _INK,
+        }
+    )
+
+
+set_style()
+
+
+def save_figure(figure: plt.Figure, path_stem: Path, caption: str) -> dict[str, Path]:
+    """Save a figure as PNG (300 dpi), SVG, and a caption text file.
+
+    ``path_stem`` is a path without an extension; the three files are written
+    beside each other. Returns the paths written, keyed by extension.
+    """
+    path_stem = Path(path_stem)
+    path_stem.parent.mkdir(parents=True, exist_ok=True)
+
+    written: dict[str, Path] = {}
+    for suffix, kwargs in (("png", {"dpi": 300}), ("svg", {})):
+        target = path_stem.with_suffix(f".{suffix}")
+        figure.savefig(target, **kwargs)
+        written[suffix] = target
+
+    caption_path = path_stem.with_suffix(".txt")
+    caption_path.write_text(caption.strip() + "\n", encoding="utf-8")
+    written["txt"] = caption_path
+
+    plt.close(figure)
+    return written
+
+
+def _rupees(paise: float) -> float:
+    return paise / 100.0
+
+
+# --------------------------------------------------------------------------
+# Figures
+# --------------------------------------------------------------------------
+
+
+def failure_mode_breakdown(shares: Mapping[str, float]) -> plt.Figure:
+    """Horizontal bars: what share of failures each cause accounts for."""
+    ordered = sorted(shares.items(), key=lambda item: item[1])
+    labels = [name.replace("_", " ").title() for name, _ in ordered]
+    values = [share for _, share in ordered]
+    colours = [OUTCOME_COLOURS.get(name, PALETTE[7]) for name, _ in ordered]
+
+    figure, axes = plt.subplots()
+    bars = axes.barh(labels, values, color=colours, height=0.62)
+    for bar, value in zip(bars, values):
+        axes.text(
+            value + 0.008,
+            bar.get_y() + bar.get_height() / 2,
+            f"{value:.1%}",
+            va="center",
+            fontsize=11,
+            color=_INK,
+        )
+
+    axes.set_xlabel("Share of all failed attempts")
+    axes.set_title("What actually goes wrong")
+    axes.set_xlim(0, max(values) * 1.18 if values else 1)
+    axes.xaxis.set_major_formatter(lambda x, _: f"{x:.0%}")
+    axes.grid(axis="y", visible=False)
+    return figure
+
+
+def failure_rate_by_hour(
+    attempts_by_hour: Sequence[int],
+    failures_by_hour: Sequence[int],
+    restricted_windows: Iterable[tuple[int, int]],
+) -> plt.Figure:
+    """Failure rate against hour of day, with the restricted window shaded.
+
+    The restricted window should be visible as a step up in the failure rate;
+    if it is not, the window is not doing anything.
+    """
+    hours = np.arange(len(attempts_by_hour))
+    attempts = np.asarray(attempts_by_hour, dtype=float)
+    failures = np.asarray(failures_by_hour, dtype=float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rate = np.where(attempts > 0, failures / attempts, np.nan)
+
+    figure, axes = plt.subplots()
+    for index, (start, end) in enumerate(restricted_windows):
+        axes.axvspan(
+            start - 0.5,
+            end - 0.5,
+            color=PALETTE[3],
+            alpha=0.13,
+            label="NPCI restricted window" if index == 0 else None,
+        )
+    axes.plot(hours, rate, color=PALETTE[0], marker="o", markersize=4)
+
+    axes.set_xlabel("Hour of day (local, 24h)")
+    axes.set_ylabel("Failure rate (share of attempts)")
+    axes.set_title("Failures cluster in the restricted window")
+    axes.set_xticks(range(0, 24, 2))
+    axes.set_xlim(-0.5, 23.5)
+    axes.set_ylim(0, np.nanmax(rate) * 1.25 if np.isfinite(rate).any() else 1)
+    axes.yaxis.set_major_formatter(lambda y, _: f"{y:.0%}")
+    axes.legend(loc="upper left")
+    return figure
+
+
+def balance_trajectory_sample(
+    trajectories_paise: Sequence[Sequence[int]],
+    salary_days: Sequence[int] | None = None,
+) -> plt.Figure:
+    """A handful of customer balance trajectories over the run."""
+    figure, axes = plt.subplots()
+    for index, trajectory in enumerate(trajectories_paise):
+        label = None
+        if salary_days is not None and index < len(salary_days):
+            label = f"paid on day {salary_days[index]}"
+        axes.plot(
+            [_rupees(value) for value in trajectory],
+            color=PALETTE[index % len(PALETTE)],
+            label=label,
+            alpha=0.9,
+        )
+
+    axes.set_xlabel("Simulation day")
+    axes.set_ylabel("Balance (rupees)")
+    axes.set_title("Balances sawtooth around the salary cycle")
+    axes.yaxis.set_major_formatter(lambda y, _: f"{y:,.0f}")
+    if salary_days is not None:
+        axes.legend(loc="upper right", ncol=2)
+    return figure
+
+
+def observed_vs_calibrated(
+    observed: Mapping[str, float],
+    calibrated: Mapping[str, float],
+    tolerance: Mapping[str, float] | None = None,
+) -> plt.Figure:
+    """Side-by-side bars: what the calibration claims vs what the sim produced.
+
+    This is the figure that says whether the simulator is honest about itself.
+    """
+    names = list(calibrated)
+    labels = [name.replace("_", " ").replace("share ", "").title() for name in names]
+    calibrated_values = [calibrated[name] for name in names]
+    observed_values = [observed.get(name, float("nan")) for name in names]
+
+    positions = np.arange(len(names))
+    width = 0.38
+
+    figure, axes = plt.subplots()
+    axes.bar(
+        positions - width / 2,
+        calibrated_values,
+        width,
+        label="Calibrated target",
+        color=PALETTE[7],
+    )
+    axes.bar(
+        positions + width / 2,
+        observed_values,
+        width,
+        label="Observed in simulator",
+        color=PALETTE[0],
+    )
+
+    if tolerance:
+        for index, name in enumerate(names):
+            band = tolerance.get(name)
+            if band is None:
+                continue
+            axes.errorbar(
+                positions[index] - width / 2,
+                calibrated[name],
+                yerr=band,
+                fmt="none",
+                ecolor=_MUTED,
+                capsize=5,
+                linewidth=1.2,
+            )
+
+    axes.set_xticks(positions)
+    axes.set_xticklabels(labels, rotation=20, ha="right")
+    axes.set_ylabel("Share of attempts / of failures")
+    axes.set_title("Observed distributions against their calibrated targets")
+    axes.yaxis.set_major_formatter(lambda y, _: f"{y:.0%}")
+    axes.legend()
+    axes.grid(axis="x", visible=False)
+    return figure

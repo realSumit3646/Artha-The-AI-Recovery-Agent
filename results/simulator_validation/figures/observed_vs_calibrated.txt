@@ -1,0 +1,1 @@
+What the calibration claims against what the simulator produced, with the tolerance bands the test suite enforces (2 points on the overall failure rate, 3 on each mode share). Agreement here is not evidence the parameters are right -- they are placeholders -- only that the simulator does what it says it does.

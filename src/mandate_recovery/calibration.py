@@ -222,13 +222,15 @@ class CalibrationSet(BaseModel):
         dict[BankTier, float]
     ] = _placeholder(
         {
-            BankTier.LARGE_PRIVATE: 0.985,
-            BankTier.PSU: 0.950,
-            BankTier.SMALL_FINANCE: 0.920,
+            BankTier.LARGE_PRIVATE: 0.955,
+            BankTier.PSU: 0.910,
+            BankTier.SMALL_FINANCE: 0.865,
         },
         "probability the issuer is available for a debit",
         "NPCI publishes bank-wise UPI technical decline rates monthly — "
-        "aggregate them into these three tiers and cite the period",
+        "aggregate them into these three tiers and cite the period; "
+        "current values fitted so technical declines match the calibrated "
+        "failure mix, see docs/CALIBRATION.md",
     )
 
     # -- Mandate lifecycle -------------------------------------------------

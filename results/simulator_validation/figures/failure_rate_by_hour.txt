@@ -1,0 +1,1 @@
+Failure rate by hour of day. The shaded bands are the NPCI window in which recurring debits are deprioritised; the step up inside them is the cost of presenting a debit at peak, and it is why the scheduler treats those hours as a hard exclusion.
