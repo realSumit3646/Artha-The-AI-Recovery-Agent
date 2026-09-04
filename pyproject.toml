@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mandate-recovery"
+version = "0.1.0"
+description = "Artha — a simulation harness for UPI Autopay recurring-payment failures and recovery policies"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+
+dependencies = [
+    "pydantic>=2",
+    "numpy",
+    "pandas",
+    "pytest",
+    "matplotlib",
+    "typer",
+    "python-dotenv",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

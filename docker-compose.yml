@@ -1,0 +1,25 @@
+# Artha — experiment harness.
+#
+# Single service. There is deliberately NO database service: this project uses
+# SQLite via a local file inside the bind-mounted project directory, nothing
+# hosted. Do not add one.
+#
+# Runs against the stock python:3.11-slim image; a project Dockerfile is
+# deferred until the dependency set settles (see PROGRESS.md).
+
+services:
+  harness:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    # Mirrors `make reproduce`, which is still a stub.
+    command: >
+      sh -c "pip install --quiet --no-cache-dir -e . &&
+             echo 'not yet implemented'"
