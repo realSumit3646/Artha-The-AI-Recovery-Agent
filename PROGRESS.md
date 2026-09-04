@@ -620,3 +620,46 @@ adds 31 tests; suite is 203 green.
   codes, so it burns its full schedule on mandates that can never succeed.
   That is realistic and is part of why it should lose on net recovery — worth
   confirming in the commit 15 numbers rather than assuming.
+
+---
+
+## Commit 12 — Perfect-information oracle
+
+**Done:** `policies/oracle.py` is the ceiling arm. It receives the `World`
+through its constructor, projects each customer's balance forward, and
+schedules the first future hour where the balance covers the amount, the bank
+is up and the window is clear — stopping when the amount exceeds the
+per-transaction ceiling or no such hour exists within a pay cycle.
+`tests/policies/test_oracle.py` adds 20 tests; suite is 223 green.
+
+**Decisions:**
+- **No edit to `test_base.py` was needed.** The exemption designed at commit
+  10 as `reads_latent_state = True` did its job: the oracle drops out of the
+  boundary checks by declaring itself, and a second test asserts it is the
+  *only* class in the registry with that flag. The build plan called for
+  editing the boundary test; the class attribute is better, because the
+  exemption is visible where it is used rather than buried in a test file.
+- **`decide` still takes only an `Observation`.** The `World` arrives through
+  `__init__`. A test pins this: if the world ever appeared in `decide`, the
+  policy interface would have been widened for every policy, not just this one.
+- The docstring states in capitals that it is an upper-bound instrument, reads
+  simulator-private state, and could not exist in production. A test asserts
+  those words are there, so the warning cannot be quietly deleted.
+- The search horizon defaults to one pay cycle (31 days). Beyond that the next
+  billing cycle supersedes this one, so a "recovery" there is not a recovery.
+- The oracle only retries; it never contacts. It therefore bounds **timing**,
+  not recovery in general. A policy that nudges a customer into topping up
+  could in principle beat it, and the module says that would be a finding
+  rather than a bug.
+- The balance projection ignores other mandates competing for the same
+  balance, making it optimistic — correct for an upper bound.
+- The oracle's test file re-implements the balance projection independently
+  rather than calling the oracle's own method, so the two agreeing is evidence
+  rather than tautology.
+
+**Open:**
+- The oracle is optimistic in a second way: it assumes its own retry is the
+  only debit. With one mandate per customer that is exact; it will overstate
+  the ceiling once a customer can hold several mandates.
+- Nothing measures how much of the headroom a policy captures yet — that
+  needs the harness and metrics, at commits 13 and 14.
