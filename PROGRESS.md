@@ -261,3 +261,68 @@ by one fails both salary-timing tests.
   result turns out to depend on it.
 - Commit 8 freezes the simulator. Calibration and world dynamics should be
   settled before then.
+
+---
+
+## Commit 5 — Attempt resolution across all failure modes
+
+**Done:** `src/mandate_recovery/sim/outcomes.py` implements
+`resolve_attempt(world, mandate, attempt, rng)`, walking the fixed order
+revoked → restricted window → bank down → over limit → insufficient funds →
+success, and debiting the latent balance only on success. Revocation is
+`revoke_eligible_mandates(...)`, which applies the calibrated monthly rate as
+a daily hazard to mandates whose customer has repeatedly failed for funds.
+`tests/sim/test_outcomes.py` adds 30 tests; suite is 96 green.
+
+Five mutations were checked: dropping the debit and halving it both fail the
+exact-deduction tests, swapping the limit and balance checks fails the
+ordering test, drawing from global numpy state fails the same-seed test, and
+dropping the repeat-failure condition fails the eligibility test.
+
+**Decisions:**
+- **`world.py` was extended, with approval**, because `resolve_attempt` had
+  no way to move money or to find a customer. It gained `debit()`, a stable
+  customer-id registry (`customer_ids`, `customer_id_for`,
+  `index_for_customer_id`, ids minted as `c000000`…) and a read-only
+  `calibration` property. Without the registry the mandate→customer link
+  would have been an undocumented string convention; without the property,
+  `outcomes.py` would have reached into a private attribute.
+- `debit()` refuses to overdraw rather than flooring at zero. A debit larger
+  than the balance means the caller skipped the funds check — a simulator
+  bug, not a customer outcome, and it should crash rather than quietly
+  produce a plausible number.
+- **Response codes are `SYNTHETIC_RAW_CODES` (`SIM_OK`, `SIM_NSF`, …) and are
+  named so nobody mistakes them for real NPCI or issuer codes.** No real code
+  vocabulary is invented. Marked `TODO(sumit)` to replace before results are
+  quoted.
+- The daily revocation hazard is `1 - (1 - monthly) ** (1/31)`, not
+  `monthly / 31`, so that compounding over a month reproduces the calibrated
+  monthly figure instead of overshooting it. Asserted in a test.
+- "Repeatedly failed" is read as at least 2 insufficient-funds failures, held
+  in `MIN_INSUFFICIENT_FUNDS_FAILURES_FOR_REVOCATION` and overridable per
+  call. It is a reading of the word, not a calibrated figure.
+- The rng is consumed only in the restricted-window branch, and a test pins
+  that: a quiet-hour attempt leaves the generator untouched, so adding retry
+  attempts outside peak hours cannot shift any other stream.
+- Revocation draws once per *eligible* mandate, in order, so the stream does
+  not depend on which mandates happen to be revoked.
+
+**Open:**
+- **The calibrated failure rate and shares are still unused, and the
+  mechanics may not reproduce them.** `upi_autopay_execution_failure_rate`
+  (0.30) and the four `share_of_failures_*` values describe a failure mix,
+  but outcomes now emerge from balances, uptime and windows instead of being
+  imposed. Nothing checks that the emergent mix matches the calibrated one.
+  Decide before the commit 8 freeze whether those parameters are targets the
+  mechanics must be fitted to, or validation figures to compare against.
+- `resolve_attempt` resolves on `world.current_day` and reads only the *hour*
+  from `attempt.scheduled_at`; the date on it is ignored. An attempt
+  scheduled for a different day resolves on the wrong day silently. Fixing it
+  needs either a calendar epoch on `World` or an explicit day argument.
+- The code mapping is one-to-one, so a policy can invert a code to the exact
+  outcome. Real rails are noisier and sometimes miscode a technical decline
+  as a funds failure, which would make the inference problem harder and the
+  experiment more honest.
+- Still unconsumed: `card_penetration_rate` and all three cost parameters.
+- No run loop yet — nothing calls `resolve_attempt` in sequence, tracks the
+  failure counts revocation needs, or advances the world alongside it.

@@ -137,6 +137,15 @@ class World:
 
         self._balances_paise = self._opening_balances()
 
+        # Stable, deterministic identities. Minted here rather than by the
+        # caller so that a mandate can always be resolved back to the customer
+        # it belongs to without a naming convention passed around by hand.
+        self._customer_ids = tuple(f"c{index:06d}" for index in range(n))
+        self._index_by_customer_id = {
+            customer_id: index
+            for index, customer_id in enumerate(self._customer_ids)
+        }
+
     def _opening_balances(self) -> np.ndarray:
         """Balances on day 0, wound forward from the last salary credit.
 
@@ -181,6 +190,11 @@ class World:
     def day_of_month(self) -> int:
         """Day of month for the current simulation day, in 1..31."""
         return (self._day % DAYS_IN_MONTH) + 1
+
+    @property
+    def calibration(self) -> CalibrationSet:
+        """The calibration this world was built from."""
+        return self._calibration
 
     @property
     def n_customers(self) -> int:
@@ -235,6 +249,51 @@ class World:
                 self._per_txn_limits_paise[customer_index]
             ),
         )
+
+    def customer_ids(self) -> tuple[str, ...]:
+        """Every customer id, in world index order."""
+        return self._customer_ids
+
+    def customer_id_for(self, customer_index: int) -> str:
+        self._check_customer(customer_index)
+        return self._customer_ids[customer_index]
+
+    def index_for_customer_id(self, customer_id: str) -> int:
+        """The world index for a customer id, as carried on a `Mandate`."""
+        try:
+            return self._index_by_customer_id[customer_id]
+        except KeyError:
+            raise KeyError(
+                f"unknown customer_id {customer_id!r}; this world holds "
+                f"{self._n_customers} customers minted as c000000.."
+                f"c{self._n_customers - 1:06d}"
+            ) from None
+
+    def debit(self, customer_index: int, amount_paise: int) -> int:
+        """Take money off a customer's balance. Returns the new balance.
+
+        The only way latent balance is reduced. Refuses to overdraw rather
+        than flooring at zero: a debit larger than the balance means the
+        caller skipped the funds check, which is a simulator bug, not a
+        customer outcome.
+        """
+        self._check_customer(customer_index)
+        if isinstance(amount_paise, bool) or not isinstance(amount_paise, int):
+            raise TypeError(
+                f"amount_paise must be an int of paise, got "
+                f"{type(amount_paise).__name__}"
+            )
+        if amount_paise < 0:
+            raise ValueError(f"amount_paise must be >= 0, got {amount_paise}")
+
+        balance = int(self._balances_paise[customer_index])
+        if amount_paise > balance:
+            raise ValueError(
+                f"cannot debit {amount_paise} paise from a balance of "
+                f"{balance}; check funds before debiting"
+            )
+        self._balances_paise[customer_index] = balance - amount_paise
+        return balance - amount_paise
 
     def balance_paise(self, customer_index: int) -> int:
         self._check_customer(customer_index)
