@@ -544,3 +544,42 @@ metric. `tests/test_costs.py` adds 21 tests; suite is 158 green.
   real run.
 - Costs are per-episode. Portfolio effects — a customer with several mandates
   contacted once — are not modelled.
+
+---
+
+## Commit 10 — Policy interface with a type-enforced boundary
+
+**Done:** `policies/base.py` defines `Policy.decide(observation) -> Decision`
+and auto-registers every subclass in `POLICY_REGISTRY` on creation.
+`policies/do_nothing.py` is the no-intervention floor. `tests/policies/
+test_base.py` walks the registry and fails if any policy's `decide` **or**
+`__init__` mentions a simulator type. 14 tests; suite is 172 green.
+
+Mutation-checked: giving `DoNothingPolicy` a `World` constructor argument
+fails with "DoNothingPolicy.__init__ accepts a simulator type". Restored
+byte-identical.
+
+**Decisions:**
+- **The oracle's exemption is a class attribute, not a line in the test.**
+  `Policy.reads_latent_state` defaults to `False`; commit 12 sets it `True` on
+  the oracle alone. The build plan called for editing this test at commit 12 —
+  declaring it on the class instead means the exemption is visible in the code
+  that uses it, and commit 12 needs no test edit. A second test requires any
+  exempt policy to call itself an upper-bound instrument in its own docstring,
+  so the flag cannot be set quietly.
+- The constructor is checked as well as `decide`. Taking the `World` in
+  `__init__` is the obvious way around a signature check, and the mutation
+  above confirms that route is closed.
+- `Policy.decision(...)` is the only way policies build a `Decision`, and it
+  defaults `validated=False`. A policy cannot mark its own action approved.
+- The registry populates via `__init_subclass__` rather than an explicit
+  decorator, so a policy cannot be omitted from the boundary test by
+  forgetting to register it.
+
+**Open:**
+- The check is by annotation, so an unannotated argument would slip through.
+  Everything in this codebase is annotated and the `decide` test pins the
+  exact parameter list, but a determined author could still reach into
+  `mandate_recovery.sim` inside a method body. That is not statically
+  catchable here; the freeze hash and code review cover it.
+- Nothing calls `decide` in a loop yet — the harness arrives at commit 13.
