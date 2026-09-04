@@ -117,3 +117,70 @@ once the mutation is reverted.
 - Resolved from Commit 1: `make test` now exits zero (17 passed), and
   `pip install -e .` with the full dependency set is verified on Python
   3.11.9 — previously unproven because the sandbox had no network.
+
+---
+
+## Commit 3 — Calibration layer with explicit assumptions
+
+**Done:** `src/mandate_recovery/calibration.py` holds every number the
+simulator is allowed to use. Each of the 15 parameters is a frozen
+`CalibratedValue` carrying `value`, `unit`, `source` and `confidence`, and
+`CalibrationSet` gathers them with cross-parameter validation: failure shares
+sum to 1.0, the salary distribution sums to 1.0 over days 1–7 and 25–31, all
+three bank tiers are present, and every rate stays within [0, 1].
+`docs/CALIBRATION.md` is the readable record — the required
+parameter/value/source/confidence table, plus the note on why published
+Autopay failure figures vary and how the sweep handles it.
+`tests/test_calibration.py` adds 29 tests; suite is 46 green.
+
+Both required assertions were mutation-checked with the model-level guard
+disabled, so the test is doing the catching: shares summing to 1.05 fails
+`test_failure_shares_sum_to_one`, and a blanked source fails
+`test_every_calibrated_value_has_a_non_empty_source`. Two honesty mutations
+were checked the same way.
+
+**Decisions:**
+- **Every parameter is `confidence="assumption"`. None is `published` or
+  `derived`.** That is the honest state: no figure here came from a document I
+  can name, so none is labelled as if it had. Sources use one of two forms —
+  the exact `NO_PUBLIC_SOURCE` wording where no public figure exists to find
+  (revocation rate, churn increment, payroll timing, window rejection rate),
+  or a `TODO(sumit)` placeholder naming where a real figure should come from
+  (failure rate and its shares, NPCI window hours, bank availability, card
+  penetration, the three costs). A `TODO(sumit)` string is a pointer to where
+  to look, never a claim that the number came from there.
+- The honesty rule is structural, not editorial: `CalibratedValue` raises if
+  `published` or `derived` appears alongside a `TODO(sumit)` or
+  no-public-source string. A guess cannot be relabelled without the model
+  refusing it.
+- `CalibratedValue` is generic (`CalibratedValue[T]`) so each parameter's
+  value type is enforced, not just its envelope. Verified that a float cannot
+  reach a paise field even by passing a hand-built `CalibratedValue`.
+- Costs reuse `NonNegativePaise` from `types.py` rather than a fresh int
+  alias, so the money rule has one definition.
+- `BankTier` is an enum rather than raw string dict keys, and a validator
+  requires all three tiers, so a missing tier fails loudly instead of
+  KeyError-ing mid-run.
+- `restricted_window_hours` is a tuple of half-open `[start, end)` hour pairs,
+  which states the boundary convention in the type instead of leaving it to
+  be rediscovered in the simulator.
+- Dict-valued parameters stay `dict`, unlike Commit 2's tuple-over-list
+  choice. The task specified dicts, and the risk that motivated tuples there
+  (a policy mutating what it was handed) does not apply: calibration is read
+  by the simulator, never passed to a policy.
+- `tests/test_calibration.py` parses the docs table and asserts every
+  parameter appears in it with a matching confidence, so code and docs cannot
+  drift apart silently.
+
+**Open:**
+- **No value here is usable for a quotable result yet.** All 15 are
+  placeholders awaiting Sumit's published figures. Nothing downstream should
+  be reported as a finding until they are filled in.
+- `CalibratedValue` records a point estimate only. The sweep promised in
+  `docs/CALIBRATION.md` needs an optimistic/pessimistic range per parameter,
+  and there is nowhere to put one yet — either a `range` field or a separate
+  sweep config is needed before commit 27.
+- Calibration must be settled before the simulator freeze at commit 8;
+  after that, changing these numbers means re-running all arms.
+- The commit message in the task was truncated mid-word ("explicit ass");
+  completed to "explicit assumptions".
