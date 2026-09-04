@@ -502,3 +502,45 @@ internally consistent but entirely unsourced; the fitted parameters sit
 outside the freeze until commit 13; and no policy, cost model or harness
 exists yet, so there is still no number in this repository that says anything
 about recovery.
+
+---
+
+## Commit 9 — Intervention cost model
+
+**Done:** `src/mandate_recovery/costs.py` charges three costs against a
+completed `Episode`: gateway fees per attempt, per-message and per-call
+contact costs, and expected churn cost (contacts x calibrated increment,
+multiplied by the mandate's remaining lifetime value). It sets the
+`over_intervention` flag when a contacted customer would have paid anyway on
+the paired counterfactual, and exposes `net_recovery_paise` as the headline
+metric. `tests/test_costs.py` adds 21 tests; suite is 158 green.
+
+**Decisions:**
+- **Churn charges only the risk the policy created**, never the customer's
+  latent churn intent. Charging latent churn would make cost depend on
+  something no policy can see and would punish arms that happened to draw
+  unhappy customers. Two identical episodes cost the same whoever the customer
+  is, and a test pins that.
+- Escalation counts as a contact for churn but carries no separate monetary
+  charge, because no agent-time figure is calibrated. This under-costs the
+  most expensive real-world action; noted below.
+- A silent retry is never over-intervention. It costs gateway fees but the
+  customer never knows it happened, so it cannot be an intrusion — only
+  contacts and escalations can.
+- Churn cost is the one term computed in float. It is an expectation over a
+  probability, so it is rounded once at the end before re-entering the money
+  path, and every field on `CostBreakdown` is asserted to be an `int`.
+- `remaining_cycles` makes churn cost proportional to what is actually left to
+  lose. Losing a customer on their final cycle is cheap; losing one with two
+  years to run is not.
+
+**Open:**
+- **Human-agent cost is uncalibrated**, so `EscalateHuman` is charged only
+  through churn. That makes escalation look cheaper than it is and could bias
+  a policy toward it. Needs an agent-minutes figure in `CalibrationSet`.
+- `would_have_paid_without_intervention` is an input here; nothing computes it
+  yet. The paired counterfactual arrives with the harness at commit 13, and
+  until then `over_intervention` is structurally correct but never true in a
+  real run.
+- Costs are per-episode. Portfolio effects — a customer with several mandates
+  contacted once — are not modelled.
