@@ -435,3 +435,70 @@ inside both bands.
   calibrated funds-failure share requires given the salary distribution. If
   real amount data says otherwise, the failure shares must move instead.
 - `card_penetration_rate` and the three cost parameters are still unconsumed.
+
+---
+
+## Commit 8 — FREEZE
+
+**Done:** `src/mandate_recovery/sim/freeze.py` pins
+`SIMULATOR_HASH = fd5a8fed4eaf5a6d719e9470a2978f93dfd2dccfe0fd2e59de65801b9b31b193`,
+a SHA256 over the serialised `CalibrationSet` and the normalised source of
+`world.py`, `outcomes.py` and `response_codes.py`.
+`tests/sim/test_freeze.py` recomputes it and fails with the required
+re-baseline message. `docs/FREEZE.md` records the date, the hash, the reason,
+and what the hash does not cover. Suite is 137 green. Tagged `sim-freeze`.
+
+The check was verified by appending a comment to `outcomes.py`: the hash moved
+and the test failed with the intended message. `outcomes.py` was restored
+byte-identical afterwards.
+
+**The world is now fixed.** Nothing in the three frozen modules was chosen
+with knowledge of how any policy performs against it, because no policy exists
+yet — that ordering is checkable in the git history, not just asserted here.
+
+**Decisions:**
+- Line endings are normalised to `\n` before hashing. `core.autocrlf` is on
+  for this repository, so without normalisation a checkout on another platform
+  would produce a different hash and the failure would look exactly like
+  tampering.
+- `freeze.py` is excluded from its own hash — it holds the hash, so including
+  it would be circular.
+- The test verifies each of the three modules contributes to the hash by
+  hashing modified *copies* in a tmp directory, so a failing run can never
+  leave the working tree edited.
+
+**Open:**
+- **The freeze is not yet complete.** The fitted parameters in
+  `scripts/validate_simulator.py` — mandate amount distribution and
+  presentment-window share — materially shape the observed failure mix but sit
+  outside the hash, because they are experiment setup rather than simulator
+  internals. Changing them changes results without tripping the test. They
+  must move into `CalibrationSet` at commit 13, which brings them under the
+  hash and closes the gap. This is recorded in `docs/FREEZE.md` too.
+- Every calibrated value is still `assumption`. The freeze fixes the world; it
+  does not make the world accurate.
+
+---
+
+### Push 1 complete — what exists now
+
+A calibrated, validated, frozen simulator, and nothing else:
+
+- **Types** with a type-enforced observation boundary and integer paise.
+- **Calibration** of 22 parameters, every one labelled, every one an
+  `assumption` with a `TODO(sumit)` or no-public-source string. No invented
+  citations.
+- **A latent world**: seeded populations, salary-cycle balances, per-tier bank
+  uptime, a 31-day calendar.
+- **Attempt resolution** across all six outcomes, with revocation.
+- **Diagnostic messiness** that leaves only ~33% of failures cleanly
+  diagnosable from the code alone.
+- **Validation** showing the emergent failure mix lands within 2 points of the
+  calibrated failure rate and 3 points of every mode share, with figures.
+- **A freeze** that makes any later change to the world fatal to the suite.
+
+Three problems worth carrying forward into push 2: the calibration is
+internally consistent but entirely unsourced; the fitted parameters sit
+outside the freeze until commit 13; and no policy, cost model or harness
+exists yet, so there is still no number in this repository that says anything
+about recovery.
