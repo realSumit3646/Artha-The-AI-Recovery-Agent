@@ -663,3 +663,62 @@ per-transaction ceiling or no such hour exists within a pay cycle.
   the ceiling once a customer can hold several mandates.
 - Nothing measures how much of the headroom a policy captures yet — that
   needs the harness and metrics, at commits 13 and 14.
+
+---
+
+## Commit 13 — Paired experiment harness and result storage
+
+**Done:** `harness/runner.py` runs every arm across every seed on **paired
+worlds**: the world is built from the seed before any policy exists and
+deep-copied per arm. `harness/storage.py` writes
+`results/<experiment_id>/` with `config.json` (run config + git SHA +
+`SIMULATOR_HASH` + timestamp), `raw/episodes.parquet`,
+`raw/decisions.parquet` and `metrics.json`, refusing to overwrite without
+`overwrite=True`. `tests/harness/test_runner.py` adds 23 tests; suite is 246
+green.
+
+Mutation-checked: replacing the per-arm `deepcopy` with a shared world breaks
+six tests including determinism and the per-mandate episode count. The pairing
+is load-bearing, not decorative.
+
+Smoke run over 2 seeds x 200 mandates x 90 days gives the ordering the design
+predicts — do_nothing < fixed_schedule < oracle on net recovery.
+
+**Decisions:**
+- **`pyarrow` was added to `pyproject.toml`, with approval**, so Parquet works
+  as the build plan specifies. Round-tripping is tested, including that paise
+  columns come back as integers rather than floats.
+- **Mandates now recur.** The first draft settled a mandate permanently on its
+  first success, so no customer ever accumulated a payment history and
+  `max_historical_success_amount_paise` was always zero — which would have
+  made the contradiction cases from commit 6 undiagnosable by construction. A
+  cycle now opens on each due day and closes on success, stop, or month end. A
+  90-day run is about three cycles.
+- `Observation.attempt_history` carries **this cycle's** attempts only; earlier
+  cycles arrive as the historical counts. Otherwise the fixed-schedule
+  baseline would read a three-cycle history as one exhausted schedule.
+- The counterfactual runs as a silent extra pass per seed, never reported as
+  an arm. A test asserts every arm agrees about it, since it describes the
+  world rather than the policy.
+- The fitted mandate-amount parameters moved from the validation script into
+  `ExperimentConfig`, so they land in every stored `config.json`.
+- `ASSUMED_MANDATE_LIFETIME_CYCLES = 12` sets the scale of churn cost. A
+  modelling choice, not a calibrated figure, and named so it is visible.
+
+**Open:**
+- **`SendNudge` closes the cycle without re-presenting the debit.** No arm in
+  this milestone sends nudges, so no number here is affected — but the
+  heuristic agent at commit 19 will nudge, and under the current harness a
+  nudge would silently forfeit the cycle. **Nudge-then-retry must be
+  implemented before commit 19** or the agent will be crippled by the harness
+  rather than by its own decisions.
+- The commit 8 freeze gap is only half closed. The fitted parameters are now
+  in the stored config, satisfying reproducibility, but they live in
+  `ExperimentConfig` rather than `CalibrationSet`, so they still sit outside
+  `SIMULATOR_HASH`. Closing it fully means moving them into the calibration
+  and re-freezing — which invalidates the current hash and every stored run.
+  Worth doing deliberately, once, before any headline number is published.
+- `CollectPartial` and `SwitchRail` are executed as next-day retries without
+  modelling a reduced amount or a card rail. Neither is used by any arm yet.
+- One mandate per customer in practice. The runner supports more, but
+  `remaining_cycles` and the oracle both assume otherwise.
