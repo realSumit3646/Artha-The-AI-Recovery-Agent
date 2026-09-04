@@ -884,3 +884,49 @@ hard exclusion, and returns the argmax with a rationale written for a human.
   one, so hour choice is driven entirely by the funds heuristic.
 - Priors are unswept. If the agent's advantage turns out to rest on the
   payday folk prior being roughly right, the sweep must say so.
+
+---
+
+## Commit 17 — Compliance validator and stopping rules
+
+**Done:** `agent/validator.py` gates every action. Seven rules: attempt cap
+per cycle, minimum hours between attempts, contact cap per rolling 7 days,
+contact hours 09:00-21:00, cumulative cost budget, no silent retry inside the
+restricted window, and no card rail without a card on file. Rejections and
+substitutions are counted by rule. `tests/agent/test_validator.py` adds 42
+tests; suite is 338 green.
+
+**Decisions:**
+- **Two rules correct rather than refuse.** A retry landing an hour too early,
+  or inside the NPCI window, is a timing error with an obviously right answer;
+  refusing it would throw away a recovery to punish a rounding mistake. Every
+  other rule refuses outright and substitutes `Stop` — there is no safe
+  correction for "you have contacted this customer three times this week".
+- `ValidationResult.action` always holds the executable action, so a caller
+  that runs `result.action` is compliant whether the verdict was approval,
+  correction, or refusal. That removes the failure mode where a caller checks
+  `approved` and then executes the original anyway.
+- **Bug found in testing:** when both corrections fired on one action —
+  pushing a retry forward landed it inside the restricted window — only the
+  last rule was counted, so `min_gap` substitutions silently under-reported.
+  Both are now counted and `rule` records the combination.
+- Stopping is always permitted, unconditionally, ahead of every other check.
+- Three `Observation` fields were added outside the task's file list, each
+  required by a specified rule and each legitimately observable: `current_hour`
+  (contact-hours rule), `contacts_in_last_7_days` (the cap is written against a
+  rolling window that cumulative `contacts_sent` cannot express), and
+  `has_card_on_file` (the card rail rule). Disjointness from
+  `LatentCustomerState` still holds.
+
+**Open:**
+- **Every limit in `ComplianceLimits` is an author's assumption.** NPCI does
+  cap re-presentment and Indian telecom rules do restrict commercial contact
+  hours, but the specific numbers here come from no circular and the module
+  says so. They need the same `TODO(sumit)` treatment as the calibration
+  before any compliance claim is made.
+- The cost budget is not the binding constraint: at 2,000 paise it permits ten
+  gateway attempts against an attempt cap of four. The attempt cap binds
+  first, which is the intended ordering, but it means the budget rule is
+  currently untested against real pressure.
+- Nothing populates the three new observation fields yet, and nothing calls
+  the validator in a run. Both land with the heuristic agent at commit 19.

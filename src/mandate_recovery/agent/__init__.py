@@ -6,6 +6,13 @@ reproducible from a stored config. The model layer, when it arrives, proposes
 into these components rather than replacing them.
 """
 
+from .validator import (
+    Budget,
+    ComplianceLimits,
+    ValidationResult,
+    Validator,
+    validate,
+)
 from .scheduler import (
     RetrySlot,
     SchedulerConstraints,
@@ -14,6 +21,11 @@ from .scheduler import (
 )
 
 __all__ = [
+    "Budget",
+    "ComplianceLimits",
+    "ValidationResult",
+    "Validator",
+    "validate",
     "RetrySlot",
     "SchedulerConstraints",
     "infer_bank_tier",

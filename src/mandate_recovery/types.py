@@ -246,9 +246,18 @@ class Observation(_FrozenModel):
     due_day: Annotated[int, Field(strict=True, ge=1, le=31)]
     # Simulation day index, not a day of the month.
     current_day: Annotated[int, Field(strict=True, ge=0)]
+    # Local clock hour right now. A collector knows what time it is; the
+    # validator needs it to enforce contact hours.
+    current_hour: Annotated[int, Field(strict=True, ge=0, le=23)] = 9
     attempt_history: tuple[ObservedAttempt, ...] = ()
     contacts_sent: Annotated[int, Field(strict=True, ge=0)] = 0
+    # Contacts inside the trailing 7 days, which is the window the contact
+    # cap is written against. Cumulative contacts_sent cannot express it.
+    contacts_in_last_7_days: Annotated[int, Field(strict=True, ge=0)] = 0
     days_since_last_contact: Optional[Annotated[int, Field(strict=True, ge=0)]] = None
+    # Whether this customer has a card usable for recurring debits. Set from
+    # the calibrated card-penetration rate; it bounds the SwitchRail action.
+    has_card_on_file: bool = False
     historical_success_count: Annotated[int, Field(strict=True, ge=0)] = 0
     historical_failure_count: Annotated[int, Field(strict=True, ge=0)] = 0
     max_historical_success_amount_paise: NonNegativePaise = 0
