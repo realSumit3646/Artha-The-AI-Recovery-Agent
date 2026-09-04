@@ -835,3 +835,52 @@ Carried into milestone 3: the harness forfeits a cycle on `SendNudge` and must
 support nudge-then-retry before commit 19; the freeze still excludes the
 fitted mandate parameters; and every calibrated number remains an unsourced
 placeholder, so no figure here is quotable as a claim about the world.
+
+---
+
+## Commit 16 — Constraint-aware retry scheduler
+
+**Done:** `agent/scheduler.py` scores candidate (day, hour) slots on four
+terms — funds-present likelihood, an inferred bank-availability prior, an hour
+preference, and a cooling-off penalty — with the NPCI restricted window as a
+hard exclusion, and returns the argmax with a rationale written for a human.
+`tests/agent/test_scheduler.py` adds 27 tests; suite is 296 green.
+
+**Decisions:**
+- **The agent's priors live in the agent package and are deliberately wrong.**
+  `ASSUMED_TIER_AVAILABILITY` (0.95/0.90/0.85) is rounder than the calibrated
+  truth (0.955/0.910/0.865), and `SALARY_DAY_PRIOR` is a folk belief about
+  Indian payroll rather than the calibrated distribution. A test asserts the
+  agent's bank priors never equal the simulator's, because if they did the
+  agent would be reading ground truth through a side door.
+- `scheduler.py` imports nothing from `mandate_recovery.sim`, and a test reads
+  the source to prove it. The one place the agent's code book is checked
+  against the simulator's vocabulary is a *test*, which keeps them in sync
+  without letting the agent import truth.
+- The restricted window arrives through `SchedulerConstraints` rather than
+  being read from calibration. NPCI publishes its peak-hour policy, so a
+  merchant legitimately knows it — but passing it in keeps the dependency
+  visible and lets the sweep vary it.
+- **Bug found and fixed while testing:** an observed payday was boosted
+  *multiplicatively* off a mid-month day's tiny prior, which left it far below
+  the month-end cluster — so "this customer actually pays us on the 15th"
+  could never overturn the population average, defeating the point of having
+  the signal. Observed days now take an absolute mass floor.
+- The hour preference favours 04:00-09:00: salary credits land overnight and
+  spending follows, so an early re-presentment catches the balance before the
+  day eats it. A belief, not a measurement, and the cheapest lever available.
+- `next_retry_slot` returns a `RetrySlot` rather than a bare `(day, hour)`
+  tuple, because the rationale has to travel with the choice into the audit
+  trail. `as_tuple()` gives the plain pair.
+
+**Open:**
+- `Observation` gained `successful_days_of_month`, outside the task's file
+  list, because the specified salary prior adjusts on it and there was no
+  observable route to that fact. It is legitimately observable — a merchant
+  knows which days they have been paid on — and the disjointness test against
+  `LatentCustomerState` still passes. Nothing populates it yet; the harness
+  wiring lands with the heuristic agent.
+- The scheduler has no hourly bank-availability prior, only a per-tier daily
+  one, so hour choice is driven entirely by the funds heuristic.
+- Priors are unswept. If the agent's advantage turns out to rest on the
+  payday folk prior being roughly right, the sweep must say so.

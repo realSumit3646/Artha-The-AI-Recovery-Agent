@@ -252,6 +252,12 @@ class Observation(_FrozenModel):
     historical_success_count: Annotated[int, Field(strict=True, ge=0)] = 0
     historical_failure_count: Annotated[int, Field(strict=True, ge=0)] = 0
     max_historical_success_amount_paise: NonNegativePaise = 0
+    # Days of the month this customer has actually paid us on. A merchant
+    # knows this from their own settlement history; it is not a read of the
+    # customer's salary date, only of when money has previously arrived.
+    successful_days_of_month: tuple[
+        Annotated[int, Field(strict=True, ge=1, le=31)], ...
+    ] = ()
 
 
 # --------------------------------------------------------------------------
