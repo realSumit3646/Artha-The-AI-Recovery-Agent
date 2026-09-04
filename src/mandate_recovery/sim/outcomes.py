@@ -8,6 +8,9 @@ Nothing here is visible to a policy. A policy learns only what a real
 collector would learn: the bank's ``raw_code`` on the resulting
 :class:`BankResponse`. It never sees the balance that caused an
 ``INSUFFICIENT_FUNDS``, nor the uptime draw behind a ``TECHNICAL_DECLINE``.
+The code itself is deliberately unreliable -- see
+:mod:`mandate_recovery.sim.response_codes` -- so diagnosis is an inference
+problem rather than a dictionary lookup.
 
 Resolution order is fixed and total. Each check answers a question a real
 rail answers in roughly this sequence, and the first one that fails ends the
@@ -41,41 +44,16 @@ from ..types import (
     Mandate,
     MandateStatus,
 )
+from .response_codes import encode_response
 from .world import DAYS_IN_MONTH, World
 
 __all__ = [
-    "SYNTHETIC_RAW_CODES",
     "MIN_INSUFFICIENT_FUNDS_FAILURES_FOR_REVOCATION",
     "resolve_attempt",
     "daily_revocation_probability",
     "revoke_eligible_mandates",
 ]
 
-
-# --------------------------------------------------------------------------
-# Bank response codes
-# --------------------------------------------------------------------------
-
-#: Codes returned to policies in place of the classified outcome.
-#:
-#: **These are SYNTHETIC. They are not real NPCI, UPI or issuer codes**, and
-#: they are deliberately named so that nobody mistakes them for real ones.
-#: A real bank returns a noisier vocabulary, with several codes per condition
-#: and some genuine ambiguity between them.
-#:
-#: TODO(sumit): replace with a real code mapping before any result is quoted.
-#: Note that the mapping here is one-to-one, so a policy can invert a code
-#: back to the exact outcome. That is defensible -- gateways really do report
-#: decline reasons -- but it makes the simulator kinder than reality, where
-#: a technical decline is sometimes miscoded as a funds failure.
-SYNTHETIC_RAW_CODES: Final[Mapping[AttemptOutcome, str]] = {
-    AttemptOutcome.SUCCESS: "SIM_OK",
-    AttemptOutcome.INSUFFICIENT_FUNDS: "SIM_NSF",
-    AttemptOutcome.LIMIT_EXCEEDED: "SIM_LIMIT",
-    AttemptOutcome.TECHNICAL_DECLINE: "SIM_TECH",
-    AttemptOutcome.WINDOW_REJECTED: "SIM_WINDOW",
-    AttemptOutcome.MANDATE_REVOKED: "SIM_REVOKED",
-}
 
 #: How many insufficient-funds failures make a mandate a revocation candidate.
 #:
@@ -119,10 +97,11 @@ def resolve_attempt(
     day = world.current_day
 
     def responded(outcome: AttemptOutcome) -> BankResponse:
+        bank_id = world.bank_id_for(customer_index)
         return BankResponse(
-            raw_code=SYNTHETIC_RAW_CODES[outcome],
+            raw_code=encode_response(outcome, bank_id, rng),
             outcome=outcome,
-            bank_id=world.bank_id_for(customer_index),
+            bank_id=bank_id,
             timestamp=attempt.scheduled_at,
         )
 

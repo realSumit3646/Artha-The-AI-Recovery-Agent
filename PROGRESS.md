@@ -326,3 +326,49 @@ dropping the repeat-failure condition fails the eligibility test.
 - Still unconsumed: `card_penetration_rate` and all three cost parameters.
 - No run loop yet — nothing calls `resolve_attempt` in sequence, tracks the
   failure counts revocation needs, or advances the world alongside it.
+
+---
+
+## Commit 6 — Diagnostic messiness layer
+
+**Done:** `src/mandate_recovery/sim/response_codes.py` makes diagnosis a real
+inference problem. `encode_response(outcome, bank_id, rng)` applies per-tier
+code vocabularies, a generic `DECLINED` bucket, missing codes, and the
+contradiction case where a limit breach reports a funds code.
+`TRUE_CAUSE_RECOVERABLE_FRACTION` is 0.33; the test recomputes it from
+200,000 samples and asserts it stays below 0.75. `docs/MESSINESS.md` explains
+the design and states plainly that every share is an author's assumption.
+`tests/sim/test_response_codes.py` adds 15 tests; suite is 112 green.
+
+**Decisions:**
+- **`outcomes.py` and `test_outcomes.py` were changed, outside the task's file
+  list.** Without wiring `encode_response` into `resolve_attempt` the layer
+  would be dead code and commit 7 would validate a simulator nobody uses. The
+  1:1 `SYNTHETIC_RAW_CODES` table from commit 5 is gone, and the two tests
+  that asserted on it were rewritten. This closes the "codes invert perfectly"
+  item left open at commit 5.
+- Resolution now consumes randomness on every *failure*, where before it only
+  did so in the restricted-window branch. `SUCCESS` and `MANDATE_REVOKED` are
+  still encoded cleanly and consume nothing, so a successful quiet-hour
+  attempt still leaves the generator untouched. Both facts are pinned by
+  tests.
+- "Unambiguously determinable" is read strictly: a code counts only if no
+  other cause ever emits it. That makes every funds code ambiguous, since
+  miscoded limit breaches hide inside it — which is the point of the
+  contradiction case, and the reason
+  `Observation.max_historical_success_amount_paise` exists.
+- The three messiness shares live in `response_codes.py`, not in
+  `CalibrationSet`. They are not claims about the world that a published
+  figure could settle; they are a modelling choice about how hard the
+  inference problem should be. Recorded in `docs/MESSINESS.md` so the
+  manufactured difficulty is visible.
+- Code strings are invented and documented as such. No real NPCI, UPI or
+  issuer vocabulary is claimed.
+
+**Open:**
+- The messiness shares are unswept. If a result hinges on them they belong in
+  the sensitivity sweep, and in `docs/LIMITATIONS.md`.
+- A lookup table now resolves only ~33% of failures cleanly. That is the
+  intended difficulty, but it means the heuristic agent's UNKNOWN rate will be
+  high — which is the argument for the LLM diagnosis stage, and should be
+  reported as such rather than treated as a defect.

@@ -14,9 +14,13 @@ import pytest
 
 from mandate_recovery.calibration import DEFAULT_CALIBRATION, BankTier, CalibrationSet
 from mandate_recovery.sim import World
+from mandate_recovery.sim.response_codes import (
+    BANK_CODE_VOCABULARY,
+    GENERIC_CODE,
+    MISSING_CODES,
+)
 from mandate_recovery.sim.outcomes import (
     MIN_INSUFFICIENT_FUNDS_FAILURES_FOR_REVOCATION,
-    SYNTHETIC_RAW_CODES,
     daily_revocation_probability,
     resolve_attempt,
     revoke_eligible_mandates,
@@ -359,12 +363,22 @@ def test_identical_attempt_with_the_same_seed_gives_the_same_outcome():
     assert run(1) != run(2), "rng is not actually driving the window branch"
 
 
-def test_resolution_does_not_touch_the_rng_outside_the_window():
-    """A quiet-hour attempt consumes no randomness, so streams stay aligned."""
+def test_a_quiet_hour_success_consumes_no_randomness():
+    """No window draw, and success is reported cleanly, so the stream holds."""
     world = _world(_healthy())
     rng = np.random.default_rng(5)
     resolve_attempt(world, _mandate(1000), _attempt(QUIET_HOUR), rng)
     assert rng.random() == np.random.default_rng(5).random()
+
+
+def test_a_failure_consumes_randomness_for_its_code():
+    """Encoding a failure is stochastic, so the generator must move."""
+    world = _world(_healthy())
+    rng = np.random.default_rng(5)
+    resolve_attempt(
+        world, _mandate(world.balance_paise(0) + 1), _attempt(QUIET_HOUR), rng
+    )
+    assert rng.random() != np.random.default_rng(5).random()
 
 
 def test_resolution_requires_an_explicit_generator():
@@ -379,19 +393,32 @@ def test_resolution_requires_an_explicit_generator():
 # --------------------------------------------------------------------------
 
 
-def test_response_carries_the_synthetic_code_for_its_outcome():
+def test_a_success_reports_its_bank_own_clean_code():
     world = _world(_healthy())
     response = resolve_attempt(
         world, _mandate(1000), _attempt(), np.random.default_rng(0)
     )
-    assert response.raw_code == SYNTHETIC_RAW_CODES[response.outcome]
+    tier = world.bank_tier_for(0)
+    assert response.outcome is AttemptOutcome.SUCCESS
+    assert response.raw_code == BANK_CODE_VOCABULARY[tier][AttemptOutcome.SUCCESS]
     assert response.bank_id == world.bank_id_for(0)
     assert response.timestamp == _attempt().scheduled_at
 
 
-def test_every_outcome_has_a_code():
-    assert set(SYNTHETIC_RAW_CODES) == set(AttemptOutcome)
-    assert len(set(SYNTHETIC_RAW_CODES.values())) == len(AttemptOutcome)
+def test_a_failure_reports_a_code_from_the_messiness_layer():
+    """The code is the bank's, the generic bucket, or missing entirely."""
+    world = _world(_healthy())
+    tier = world.bank_tier_for(0)
+    allowed = set(BANK_CODE_VOCABULARY[tier].values()) | {GENERIC_CODE}
+    allowed |= set(MISSING_CODES)
+
+    rng = np.random.default_rng(4)
+    for _ in range(50):
+        response = resolve_attempt(
+            world, _mandate(world.balance_paise(0) + 1), _attempt(), rng
+        )
+        assert response.outcome is AttemptOutcome.INSUFFICIENT_FUNDS
+        assert response.raw_code in allowed
 
 
 def test_unknown_customer_is_rejected_loudly():
