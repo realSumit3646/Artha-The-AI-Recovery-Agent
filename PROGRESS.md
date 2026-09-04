@@ -583,3 +583,40 @@ byte-identical.
   `mandate_recovery.sim` inside a method body. That is not statically
   catchable here; the freeze hash and code review cover it.
 - Nothing calls `decide` in a loop yet — the harness arrives at commit 13.
+
+---
+
+## Commit 11 — Fixed-schedule baseline
+
+**Done:** `policies/fixed_schedule.py` retries at T+1, T+3, T+5 from the first
+failure, at a fixed hour on a fixed rail, then stops. No diagnosis, no channel
+choice, no timing intelligence. Offsets, hour and rail are all constructor
+arguments so the sweep can re-tune it. `tests/policies/test_fixed_schedule.py`
+adds 31 tests; suite is 203 green.
+
+**Decisions:**
+- **The default retry hour is 09:00, deliberately outside the NPCI restricted
+  window.** This is the single most consequential fairness choice in the
+  project so far. A baseline retrying at 11:00 would eat a 35% window
+  rejection on every attempt and hand the agent a large advantage on a
+  decision no competent ops team gets wrong — NPCI's deprioritisation is
+  public. The agent has to win on what is actually hard: the customer's cash
+  cycle, an ambiguous response code, and whether to make contact at all. A
+  test asserts the default hour is outside every calibrated window, with a
+  failure message calling a strawman a strawman.
+- Offsets are measured from the **first** failure, not the last attempt, so
+  T+3 means three days after the original decline. Pinned by a test, because
+  the other reading silently stretches the schedule.
+- It never schedules into the past. A decision reached late takes the earliest
+  slot still available rather than emitting an unreachable day.
+- Tests assert it ignores the response code, the amount, and the customer's
+  history — proving it is dumb in exactly the ways claimed, so the comparison
+  measures intelligence rather than an accidental extra feature.
+
+**Open:**
+- T+1/T+3/T+5 is described in merchant recovery guides but is not a published
+  standard, and the module says so rather than citing one.
+- The baseline never gives up early on a revoked mandate: it cannot read
+  codes, so it burns its full schedule on mandates that can never succeed.
+  That is realistic and is part of why it should lose on net recovery — worth
+  confirming in the commit 15 numbers rather than assuming.

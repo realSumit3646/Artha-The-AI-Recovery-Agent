@@ -7,5 +7,11 @@ boundary test walks.
 
 from .base import POLICY_REGISTRY, Policy
 from .do_nothing import DoNothingPolicy
+from .fixed_schedule import FixedSchedulePolicy
 
-__all__ = ["POLICY_REGISTRY", "Policy", "DoNothingPolicy"]
+__all__ = [
+    "POLICY_REGISTRY",
+    "Policy",
+    "DoNothingPolicy",
+    "FixedSchedulePolicy",
+]
