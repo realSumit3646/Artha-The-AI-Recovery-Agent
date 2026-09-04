@@ -56,3 +56,64 @@ exist but are empty.
   collects no tests, and there are none yet. This resolves itself with the
   first real test (the information-asymmetry test); do not paper over it by
   making the target ignore pytest's exit status.
+
+---
+
+## Commit 2 — Domain types and the observation boundary
+
+**Done:** `src/mandate_recovery/types.py` defines the domain model as frozen
+pydantic models: `Mandate`, `LatentCustomerState` (simulator-private),
+`BankResponse`, `Attempt`, `Observation`, the `Action` union
+(`RetrySilent`, `SendNudge`, `CollectPartial`, `SwitchRail`, `EscalateHuman`,
+`Stop`) and `Decision`, plus the `MandateStatus`, `Rail`, `AttemptOutcome` and
+`NudgeChannel` enums. `tests/test_types.py` holds 17 tests, including
+`test_observation_contains_no_latent_fields` and
+`test_all_money_fields_are_typed_int`. Suite is green on Python 3.11.
+
+The two enforcement tests were mutation-checked rather than merely run:
+leaking `churn_intent` onto `Observation` fails the boundary test, and
+retyping a `*_paise` field as `float` fails the money test. Both pass again
+once the mutation is reverted.
+
+**Decisions:**
+- Each `Action` variant carries a `kind: Literal[...]` tag so the union is a
+  real pydantic discriminated union. The task listed constructor arguments
+  only; a tagged union cannot be built without a discriminator, and an
+  untagged one resolves by trial order, which would silently mis-parse a
+  stored decision on replay.
+- `attempt_history` is `tuple[ObservedAttempt, ...]`, not `list`. A frozen
+  model with a list field is only shallow-frozen: a policy could mutate the
+  history it was handed, and the model would not be hashable. The wire shape
+  is unchanged — it still serialises as a JSON array.
+- `ObservedAttempt` was introduced for the `{day, hour, rail, raw_code}`
+  entries, since the shape needed a name to be validated.
+- `ObservedAttempt` carries the bank's `raw_code` string and deliberately not
+  `AttemptOutcome`. The classified outcome is the simulator's reading of its
+  own latent state; a real collector sees response codes and has to infer.
+- Money fields are `Annotated[int, Field(strict=True, ...)]`. Without
+  `strict`, pydantic accepts `49900.0` and coerces it, which would put float
+  arithmetic in the money path — the exact thing the paise rule forbids.
+- Every model sets `extra="forbid"`. On `Observation` this is load-bearing:
+  passing a latent fact as an extra keyword is a construction-time error
+  instead of a silently attached attribute.
+- `scheduled_at` and `timestamp` are `datetime`, while `Observation` exposes
+  coarse `day`/`hour` integers. The asymmetry is intentional and matches the
+  spec. Neither field has a `now()` default, so nothing reads the wall clock.
+- `due_day` is a day of the month (1–31, matching `Mandate.day_of_month`);
+  `current_day` is the simulation day index. Both are documented inline
+  because the names alone do not distinguish them.
+- `Decision.validated` defaults to `False`, so an unreviewed decision is never
+  actionable by accident.
+
+**Open:**
+- `NudgeChannel` (SMS/WHATSAPP/EMAIL/IVR) and `tone_level` (strict int, `ge=1`,
+  no upper bound) are provisional: the task specified `channel` and
+  `tone_level` without types. Fix the scale when the outreach model is built.
+- Two time representations now coexist — `datetime` internally, `day`/`hour`
+  on the observation. If that friction shows up in the simulator, a `SimTime`
+  value object is the likely answer.
+- Nothing sets `Decision.validated` yet; the deterministic validator that
+  approves actions is still to be written.
+- Resolved from Commit 1: `make test` now exits zero (17 passed), and
+  `pip install -e .` with the full dependency set is verified on Python
+  3.11.9 — previously unproven because the sandbox had no network.
