@@ -1,0 +1,1 @@
+Net recovery across five arms on identical worlds, 120 paired seeds. Floor, industry baseline, deterministic agent, LLM agent, and the perfect-information ceiling.

@@ -1,0 +1,306 @@
+{
+  "experiment_id": "ablation",
+  "written_at": "2026-09-05T15:53:13.708713+00:00",
+  "git_sha": "3bfc453c48116c9872390055f25d61e062105bc8",
+  "simulator_hash": "fd5a8fed4eaf5a6d719e9470a2978f93dfd2dccfe0fd2e59de65801b9b31b193",
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119
+  ],
+  "n_customers": 500,
+  "n_mandates": 500,
+  "n_days": 90,
+  "mandate_amount_paise_median": 880000,
+  "mandate_amount_lognormal_sigma": 1.2,
+  "default_presentment_hour": 9,
+  "nudge_followup_days": 1,
+  "assumed_mandate_lifetime_cycles": 12,
+  "calibration": {
+    "upi_autopay_execution_failure_rate": {
+      "value": 0.3,
+      "unit": "fraction of scheduled executions that fail",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: NPCI UPI monthly statistics / payment-gateway autopay success reports; pick a single reporting period and cite it",
+      "confidence": "assumption"
+    },
+    "share_of_failures_insufficient_funds": {
+      "value": 0.55,
+      "unit": "fraction of failed executions",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: gateway or issuer decline-reason breakdown for recurring debits",
+      "confidence": "assumption"
+    },
+    "share_of_failures_technical": {
+      "value": 0.25,
+      "unit": "fraction of failed executions",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: gateway or issuer decline-reason breakdown for recurring debits",
+      "confidence": "assumption"
+    },
+    "share_of_failures_limit": {
+      "value": 0.1,
+      "unit": "fraction of failed executions",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: gateway or issuer decline-reason breakdown for recurring debits",
+      "confidence": "assumption"
+    },
+    "share_of_failures_window_rejected": {
+      "value": 0.1,
+      "unit": "fraction of failed executions",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: gateway or issuer decline-reason breakdown for recurring debits",
+      "confidence": "assumption"
+    },
+    "restricted_window_hours": {
+      "value": [
+        [
+          10,
+          13
+        ],
+        [
+          17,
+          21
+        ]
+      ],
+      "unit": "local clock hours, half-open [start, end)",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: NPCI circular on processing windows for recurring e-mandates \u2014 confirm the exact peak hours and the circular number",
+      "confidence": "assumption"
+    },
+    "restricted_window_rejection_probability": {
+      "value": 0.35,
+      "unit": "probability a debit presented inside the window is deprioritised",
+      "source": "no public source \u2014 author's assumption (NPCI states recurring debits are deprioritised at peak, but publishes no rejection rate)",
+      "confidence": "assumption"
+    },
+    "bank_availability_by_tier": {
+      "value": {
+        "large_private": 0.955,
+        "psu": 0.91,
+        "small_finance": 0.865
+      },
+      "unit": "probability the issuer is available for a debit",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: NPCI publishes bank-wise UPI technical decline rates monthly \u2014 aggregate them into these three tiers and cite the period; current values fitted so technical declines match the calibrated failure mix, see docs/CALIBRATION.md",
+      "confidence": "assumption"
+    },
+    "monthly_mandate_revocation_rate": {
+      "value": 0.02,
+      "unit": "fraction of active mandates revoked per month",
+      "source": "no public source \u2014 author's assumption (revocation is a customer action merchants report privately, if at all)",
+      "confidence": "assumption"
+    },
+    "salary_credit_day_distribution": {
+      "value": {
+        "1": 0.18,
+        "2": 0.1,
+        "3": 0.06,
+        "4": 0.04,
+        "5": 0.04,
+        "6": 0.03,
+        "7": 0.03,
+        "25": 0.04,
+        "26": 0.04,
+        "27": 0.05,
+        "28": 0.06,
+        "29": 0.08,
+        "30": 0.13,
+        "31": 0.12
+      },
+      "unit": "probability mass by day of month",
+      "source": "no public source \u2014 author's assumption (no public dataset of Indian payroll credit dates; shape reflects month-end and first-week clustering)",
+      "confidence": "assumption"
+    },
+    "card_penetration_rate": {
+      "value": 0.25,
+      "unit": "fraction of customers holding a card usable for recurring debits",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: RBI monthly card statistics, bounded to the customer segment this experiment models",
+      "confidence": "assumption"
+    },
+    "gateway_cost_per_attempt_paise": {
+      "value": 200,
+      "unit": "paise per debit attempt",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: published payment-gateway pricing for recurring mandates",
+      "confidence": "assumption"
+    },
+    "sms_cost_paise": {
+      "value": 15,
+      "unit": "paise per message",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: published transactional SMS / DLT pricing",
+      "confidence": "assumption"
+    },
+    "voice_call_cost_paise": {
+      "value": 120,
+      "unit": "paise per completed call",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: published outbound IVR or agent-call pricing",
+      "confidence": "assumption"
+    },
+    "churn_probability_increment_per_contact": {
+      "value": 0.015,
+      "unit": "probability added to churn intent per customer contact",
+      "source": "no public source \u2014 author's assumption (the cost of nagging a customer is not something merchants publish)",
+      "confidence": "assumption"
+    },
+    "bank_tier_mix": {
+      "value": {
+        "large_private": 0.45,
+        "psu": 0.4,
+        "small_finance": 0.15
+      },
+      "unit": "fraction of customers banking with each tier",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: RBI / NPCI bank-wise account or UPI volume share, narrowed to the customer segment this experiment models",
+      "confidence": "assumption"
+    },
+    "monthly_salary_paise_median": {
+      "value": 3500000,
+      "unit": "paise per month, median of the salary distribution",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: PLFS or EPFO wage distribution for the salaried segment",
+      "confidence": "assumption"
+    },
+    "monthly_salary_lognormal_sigma": {
+      "value": 0.55,
+      "unit": "sigma of log salary (dimensionless)",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: derive from two published wage percentiles; record the calculation and re-mark this parameter as derived",
+      "confidence": "assumption"
+    },
+    "monthly_spend_share_of_salary": {
+      "value": 0.75,
+      "unit": "fraction of monthly salary spent over the month",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: household consumption survey (MPCE) against the same wage segment",
+      "confidence": "assumption"
+    },
+    "initial_churn_intent_alpha": {
+      "value": 1.5,
+      "unit": "alpha of the Beta prior on initial churn intent",
+      "source": "no public source \u2014 author's assumption (churn intent is not observable, so no public figure can exist; alpha/beta chosen to put most customers near zero intent)",
+      "confidence": "assumption"
+    },
+    "initial_churn_intent_beta": {
+      "value": 28.5,
+      "unit": "beta of the Beta prior on initial churn intent",
+      "source": "no public source \u2014 author's assumption (paired with initial_churn_intent_alpha for a mean of 0.05)",
+      "confidence": "assumption"
+    },
+    "per_txn_limit_paise_by_tier": {
+      "value": {
+        "large_private": 10000000,
+        "psu": 10000000,
+        "small_finance": 5000000
+      },
+      "unit": "paise, per-transaction ceiling for a recurring debit",
+      "source": "TODO(sumit): placeholder, not sourced \u2014 expected source: NPCI UPI transaction-limit circulars plus per-bank published mandate limits",
+      "confidence": "assumption"
+    }
+  }
+}

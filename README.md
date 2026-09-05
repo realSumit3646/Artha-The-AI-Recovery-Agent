@@ -25,54 +25,70 @@ the placeholders rather than the other way round.
 
 ## The result
 
-**The deterministic agent ties the industry baseline. Its advantage does not
-generalise: across a 54-cell sweep of alternative worlds it survives in about
-a third of them.**
+**The LLM agent beats the industry baseline by Rs 102,635 per seed (95% CI
+Rs 76,192 to Rs 130,046), losing on 23.3% of seeds — and it wins by contacting
+customers ten times less often, not by recovering more.**
 
-![Recovery bounds](results/heuristic/figures/all_arms_bounds.png)
+![All arms](results/ablation/figures/all_arms.png)
 
 120 paired seeds, 500 mandates each, 90 simulated days. Every arm faces a
 bit-identical world on a given seed, so each comparison is a within-subject
 measurement rather than a difference of two noisy averages.
 
-| Arm | Net recovery | Recovery rate | Attempts/recovery | Headroom captured |
-| --- | ---: | ---: | ---: | ---: |
-| No intervention (floor) | Rs 11,866 L | 73.1% | 1.37 | 0% |
-| Fixed schedule T+1/3/5 | Rs 13,641 L | 81.3% | 2.06 | 50.1% |
-| Heuristic agent (no LLM) | Rs 13,623 L | 82.4% | 1.78 | 49.6% |
-| Oracle, perfect information (ceiling) | Rs 15,409 L | 84.8% | 1.38 | 100% |
+| Arm | Net recovery | Recovery rate | Contacts/recovery | Cost per Rs 100 | Headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| No intervention (floor) | Rs 11,866 L | 73.1% | 0.000 | — | 0% |
+| Fixed schedule T+1/3/5 | Rs 13,641 L | 81.3% | 0.000 | Rs 4.30 | 50.1% |
+| Heuristic agent (no LLM) | Rs 13,623 L | 82.4% | 0.082 | Rs 4.89 | 49.6% |
+| **LLM agent** | **Rs 13,764 L** | 82.0% | **0.008** | **Rs 1.54** | **53.6%** |
+| Oracle, perfect information (ceiling) | Rs 15,409 L | 84.8% | 0.000 | Rs 2.60 | 100% |
 
-The heuristic agent against the fixed schedule: mean delta **Rs −15,265**
-(95% CI Rs −52,047 to +22,500), **losing on 63 of 120 seeds (52.5%)**. The
-interval spans zero.
+| Comparison | Mean delta | 95% CI | Loss rate |
+| --- | ---: | --- | ---: |
+| **LLM agent vs heuristic** | **+Rs 117,900** | Rs 81,461 to 153,122 | **27.5%** |
+| **LLM agent vs fixed schedule** | **+Rs 102,635** | Rs 76,192 to 130,046 | **23.3%** |
+| Heuristic vs fixed schedule | −Rs 15,265 | −Rs 52,047 to +22,500 | 52.5% |
 
-It recovers *more* — 82.4% against 81.3%, with fewer attempts — and recovers
-it more expensively. Contacting a customer raises their churn probability by
-the calibrated increment, which on an Rs 8,800 mandate with a year left to run
-costs about Rs 1,188 in expected lifetime value: roughly 13.5% of the mandate,
-spent to buy a percentage point of recovery. **Under this cost model the
-agent's edge in timing is spent paying for the contact that produced it.**
+Loss rate — the share of the 120 worlds where an arm actually *lost* — sits
+next to every mean in this project and is never omitted.
 
-A rule-based code book resolves 77% of failures; the remaining **23.0% return
-UNKNOWN** — a generic code, a missing code, or a funds code that history
-cannot separate from a ceiling breach. That is the gap a model stage would
-have to fill.
+**The LLM agent does not win by recovering more money. It recovers slightly
+less** — 82.0% against the heuristic's 82.4%, using *more* attempts per
+recovery. It wins by contacting customers **ten times less often**, which
+drops over-intervention from 8.4% to zero and cost per Rs 100 recovered from
+Rs 4.89 to Rs 1.54.
+
+Contacting a customer raises their churn probability by the calibrated
+increment, which on an Rs 8,800 mandate with a year left to run costs about
+Rs 1,188 in expected lifetime value — roughly 13.5% of the mandate, to buy
+about one percentage point of recovery. The heuristic's decision table nudges
+after two failed retries regardless. The model, told in its prompt what a
+contact actually costs, mostly declined to make one. **Its contribution was
+knowing when not to act.**
+
+A rule-based code book resolves 77% of failures. The model was consulted on
+the remaining **23.1%** — generic codes, missing codes, and funds codes that
+history cannot separate from a ceiling breach — and resolved 89.4% of them.
+The deterministic compliance validator still refused 20,853 of the actions the
+pipeline produced. Detail in [`docs/ABLATION.md`](docs/ABLATION.md).
 
 ### Two things this project does not claim
 
-**The LLM ablation has not run.** The model layer is built, tested and cached,
-but the Gemini free tier allows 20 requests per day per model and the
-experiment needs ~250–300 distinct calls. A live run warmed 17 cache entries,
-then every call returned 429 and the agent fell back to the heuristic on every
-decision — which would have produced an LLM arm numerically identical to the
-control. **That run was discarded rather than recorded.** See
-[`docs/ABLATION.md`](docs/ABLATION.md).
+**The winning arm has not been stress-tested.** The 54-regime sensitivity
+sweep ran before the ablation, when no arm had won, so it covers the
+*heuristic* agent — whose advantage survived only 37% of regimes, collapsing
+when failures are frequent (6% of cells) or transaction ceilings are tight
+(6%). Whether the LLM agent's advantage survives those same worlds is
+**unmeasured**. See [`docs/SENSITIVITY.md`](docs/SENSITIVITY.md).
 
-**The advantage is fragile.** The sensitivity sweep holds in 20 of 54 regimes
-(37%), with 40 of 54 confidence intervals excluding zero — most of the losses
-are as solid as the wins. It collapses when failures are frequent (6% of cells
-hold) or ceilings are tight (6%). See
-[`docs/SENSITIVITY.md`](docs/SENSITIVITY.md).
+**An earlier run of the ablation said the opposite, and was discarded.** With
+the response cache only 47% covered by call volume, 65% of the LLM arm's
+decisions silently became heuristic decisions, and the run reported the LLM
+agent *losing* by Rs 42,597 with a confidence interval excluding zero — same
+code, same seeds. A partially-cached LLM arm does not fail loudly; it quietly
+becomes its own control and returns a confident wrong answer. The cache is now
+100% covered across 444 committed entries, verified by an iterative warming
+process that converged over five rounds.
 
 ## Quickstart
 
@@ -80,15 +96,15 @@ hold) or ceilings are tight (6%). See
 git clone https://github.com/realSumit3646/Artha-The-AI-Recovery-Agent.git
 cd Artha-The-AI-Recovery-Agent
 make install          # needs Python 3.11 specifically
-make test             # 528 tests
+make test             # 560 tests
 make reproduce        # every experiment, from stored configs
 ```
 
 `make reproduce` runs the simulator validation, the baselines, the heuristic
 experiment and the sensitivity sweep, and regenerates every figure. **No API
-key is required**: the model layer runs from the committed cache in
-`llm_cache/`, and the experiments that currently carry results use no model at
-all.
+key is required** — the model layer runs entirely from the committed cache in
+`llm_cache/` (444 entries, 100% call coverage). Add `--with-ablation` to
+include the LLM comparison, which is also served from cache.
 
 If your network intercepts TLS (corporate proxies, some antivirus), set
 `SSL_CERT_FILE` to a bundle including the intercepting root. The client does
@@ -172,7 +188,8 @@ all** in the template. A model that cannot see a number cannot get one wrong.
 
 ## Status
 
-Milestones 1–4 are built; milestone 5 is documentation and reproduction. The
+All five milestones are built, including the ablation that decides the
+headline claim. The
 FastAPI service and React viewer from the original plan were deliberately cut
 in favour of the sensitivity sweep and the reproduction path, per the plan's
 own guidance on what to drop first.

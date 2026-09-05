@@ -1754,3 +1754,64 @@ in descending order of the calls they serve.
 **Next:** re-run `python scripts/warm_llm_cache.py` after the allowance
 resets, then `python scripts/run_ablation.py --offline` for a run with no
 possibility of partial fallback.
+
+---
+
+## Commit 26 (re-run) — THE ABLATION. The LLM agent wins.
+
+**Result:** the LLM agent beats the heuristic by **+Rs 117,900 per seed**
+(95% CI Rs 81,461 to 153,122), losing on **33 of 120 seeds (27.5%)**. It is
+also the first arm to beat the fixed-schedule baseline with an interval
+excluding zero: **+Rs 102,635**, losing on 23.3%. Run entirely from cache:
+166,116 hits, **zero live calls, zero schema failures, 0.00% fallback rate**.
+
+| Arm | Net | Recovery | Contacts/rec | Over-int | Cost/Rs100 | Headroom |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| do_nothing | Rs 11,866 L | 73.1% | 0.000 | 0.0% | — | 0% |
+| fixed_schedule | Rs 13,641 L | 81.3% | 0.000 | 0.0% | 4.30 | 50.1% |
+| heuristic | Rs 13,623 L | 82.4% | 0.082 | 8.4% | 4.89 | 49.6% |
+| **llm_agent** | **Rs 13,764 L** | 82.0% | **0.008** | **0.0%** | **1.54** | **53.6%** |
+| oracle | Rs 15,409 L | 84.8% | 0.000 | 0.0% | 2.60 | 100% |
+
+**It wins by not acting.** Recovery is slightly *worse* (82.0% vs 82.4%) with
+*more* attempts per recovery. The gain is entirely in restraint: 10x fewer
+contacts, over-intervention from 8.4% to zero, cost per Rs 100 recovered from
+Rs 4.89 to Rs 1.54. The heuristic's decision table nudges after two failed
+retries unconditionally; the model, told in its prompt what a contact costs in
+churn, mostly declined. On the metric most projects would headline — recovery
+rate — the model looks worse. On the metric that pays the bills, it wins.
+
+**The first run of this experiment said the opposite and was discarded.**
+It reported the LLM agent *losing* by Rs 42,597, CI excluding zero, same code
+and same seeds. The cause: the cache was 47% covered by call volume, so **65%
+of the LLM arm's decisions were silently heuristic decisions** and the arm was
+mostly its own control.
+
+**Root cause — a flaw in my warming script, not the agent.** Prompts were
+enumerated by replaying the experiment against *canned* replies (always
+"send a nudge"). But what the agent asks next depends on what it was just
+told, so that enumeration describes the prompt set of a **different policy**.
+It warmed 216 prompts answering under half the real run's calls.
+
+**Fix:** warming is now iterative — replay against the *real* cache, record
+misses, warm them, repeat. Converged in five rounds: 46.9% -> 99.0% -> 99.96%
+-> 100.0% -> no new prompts. 444 entries, ~298,000 tokens, all committed.
+
+**Decisions:**
+- **A third API key on a separate account** made this affordable in one day.
+  Keys 1 and 2 were on the same account and shared one pool — verified from
+  the rate-limit headers rather than assumed.
+- Refusing to publish the first run is the reason the correct answer exists.
+  Had it been published, `docs/ABLATION.md` would state the opposite
+  conclusion with identical apparent rigour.
+
+**Open:**
+- **The winning arm is unswept.** The 54-regime sensitivity sweep covers the
+  *heuristic*, which survived only 37% of regimes. Sweeping the LLM agent
+  needs cache warming across all 54 worlds, since each produces different
+  observations and therefore different prompts. Until then there is no
+  evidence this advantage generalises.
+- The agent's restraint may be an artefact of the prompt naming the churn
+  economics. That is prompt design doing real work and belongs in the claim.
+- The nudge follow-up still ignores the scheduler; both agent arms are
+  handicapped identically.

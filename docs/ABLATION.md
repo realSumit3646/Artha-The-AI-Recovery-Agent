@@ -1,89 +1,132 @@
 # Ablation: heuristic agent vs LLM agent
 
-> **STATUS: NOT YET RUN. This document reports no result, because there is no
-> result to report.** The experiment is implemented, tested and ready; it is
-> blocked on API quota. Details below. Nothing in this file should be read as
-> a finding, and no number from a partial run has been recorded here.
+> **The LLM agent wins. +Rs 117,900 per seed against the deterministic
+> heuristic (95% CI Rs 81,461 to Rs 153,122), losing on 33 of 120 seeds
+> (27.5%). It is also the first arm to beat the industry baseline with a
+> confidence interval that excludes zero: +Rs 102,635, losing on 23.3%.**
+>
+> **It does not win by recovering more money. It recovers slightly *less*.
+> It wins by not contacting customers.**
 
-## What the experiment is
+120 paired seeds, 500 mandates, 90 days, `openai/gpt-oss-120b` at temperature
+0, served entirely from the committed cache: **166,116 cache hits, zero live
+calls, zero schema failures, 0.00% stage fallback rate.**
 
-Five arms on the same 120 paired seeds used by every earlier run:
+## The result
 
-| Arm | What it is |
-| --- | --- |
-| `do_nothing` | the no-intervention floor |
-| `fixed_schedule` | the industry-standard T+1/T+3/T+5 baseline |
-| `heuristic` | the deterministic agent — no model anywhere |
-| `llm_agent` | the same agent, with a model on residual diagnosis and intervention choice |
-| `oracle` | the perfect-information ceiling |
+| Arm | Net recovery | Recovery rate | Attempts/rec | Contacts/rec | Over-intervention | Headroom |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| do_nothing | Rs 11,866 L | 73.1% | 1.37 | 0.000 | 0.0% | 0% |
+| fixed_schedule | Rs 13,641 L | 81.3% | 2.06 | 0.000 | 0.0% | 50.1% |
+| heuristic | Rs 13,623 L | 82.4% | 1.78 | 0.082 | 8.4% | 49.6% |
+| **llm_agent** | **Rs 13,764 L** | 82.0% | 1.94 | **0.008** | **0.0%** | **53.6%** |
+| oracle (cheats) | Rs 15,409 L | 84.8% | 1.38 | 0.000 | 0.0% | 100% |
 
-The comparison that decides the project's claim is **`llm_agent` against
-`heuristic`**. Both use the same scheduler, the same compliance validator, the
-same cost model and the same fallback path. The only difference between them
-is whether a language model resolves the diagnoses a code book cannot settle
-and chooses the intervention. That is as clean an ablation as this design
-allows, and it is why the two arms were built to share everything else.
+| Comparison | Mean delta | 95% CI | Loss rate |
+| --- | ---: | --- | ---: |
+| llm_agent vs heuristic | **+Rs 117,900** | Rs 81,461 to 153,122 | **27.5%** |
+| llm_agent vs fixed_schedule | **+Rs 102,635** | Rs 76,192 to 130,046 | **23.3%** |
+| heuristic vs fixed_schedule | −Rs 15,265 | −Rs 52,047 to +22,500 | 52.5% |
+| oracle vs llm_agent | +Rs 1,370,777 | Rs 1,329,403 to 1,413,557 | 0.0% |
 
-Four comparisons are declared in `scripts/run_ablation.py` and their count is
-written into `metrics.json`, so a reader can see how many were run rather than
-how many were reported.
+Four comparisons were declared before the run and all four are reported.
 
-## Why it has not run
+## Where the gain came from
 
-The Gemini free tier allows **20 requests per day per model per project**
-(`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, quota value `20`). The
-experiment needs roughly 250–300 *distinct* model calls to warm its cache.
+Not from recovering more. The LLM agent recovers **82.0%** against the
+heuristic's **82.4%**, and uses *more* attempts per recovery (1.94 vs 1.78).
+On the metric most projects would headline, it is slightly worse.
 
-The prompt design already does everything it can to reduce that number.
-Prompts are canonical and bucketed — `amount_vs_history` renders as "somewhat
-larger than anything they have paid before" rather than a rupee figure — so a
-measured run over 10 seeds and 5,000 mandates produced **12,329 model calls
-collapsing onto just 198 distinct prompts**. Every one of those 12,329 calls
-after the first of its kind is served from disk. That is a 62× reduction, and
-it is still an order of magnitude more than a 20/day quota allows.
+The difference is restraint:
 
-A first live attempt warmed **17 cache entries** before the quota was
-exhausted. Those entries are committed. After that point every call returned
-`429 RESOURCE_EXHAUSTED`, retries were exhausted, and the LLM agent fell back
-to the heuristic on every decision — which would have produced an `llm_agent`
-arm numerically identical to `heuristic` and an ablation that measured
-nothing. **The run was stopped rather than recorded.** An arm that is silently
-the control is worse than no arm at all, because it looks like a result.
+| | heuristic | llm_agent |
+| --- | ---: | ---: |
+| Contacts per recovery | 0.082 | **0.008** — 10x fewer |
+| Over-intervention rate | 8.4% | **0.0%** |
+| Cost per Rs 100 recovered | Rs 4.89 | **Rs 1.54** — a third |
 
-## What unblocks it
+The heuristic's decision table nudges after two failed silent retries, full
+stop. The model was told in its prompt what a contact actually costs — roughly
+a tenth of the mandate's remaining value in churn risk — and chose to nudge
+about a tenth as often. Its over-intervention rate, the share of episodes
+where a contacted customer would have paid anyway, fell to zero.
 
-1. **Enable billing on the Google AI Studio project.** The paid tier's limits
-   are far above what this needs; the whole experiment is a few hundred calls
-   and a few million tokens. Then run `python scripts/run_ablation.py`.
-2. Or supply a key on a plan with a higher daily allowance.
+**The model's contribution was knowing when not to act.** That is a more
+interesting finding than "the AI recovered more", and it is the opposite of
+what a recovery-rate headline would have shown.
 
-Once the cache is warm, `python scripts/run_ablation.py --offline` reproduces
-the result from `llm_cache/` with no key at all, which is the mode
-`make reproduce` uses.
+## How narrowly the model was used
 
-## How the result will be reported
+| | |
+| --- | ---: |
+| Diagnoses resolved by rules | 103,080 (76.9%) |
+| Diagnoses routed to the model | 30,948 (**23.1%**) |
+| ...of which the model resolved confidently | 27,677 (89.4%) |
+| Stage fallbacks | **0** |
+| Schema failures | **0** |
+| Message verification failures | **0** |
+| Actions refused by the compliance validator | 20,853 |
 
-Written down before the number is known, so it cannot be shaded afterwards:
+The model was consulted on under a quarter of failures — only those a
+rule-based code book genuinely cannot settle — and the deterministic validator
+still refused 20,853 of the actions that came out of the pipeline.
 
-- **If the LLM agent wins:** the margin, the bootstrap 95% CI, the loss rate,
-  the model-invocation rate and the token cost, plus a statement of *where*
-  the gain came from — residual diagnosis, intervention choice, or messaging.
-- **If the heuristic wins or ties:** that goes in the first line of this
-  document. The honest conclusion would be that recovery is a scheduling
-  problem, that the deterministic policy is what ships for intervention
-  selection, and that the model is retained only for residual diagnosis and
-  message drafting if it earns those.
-- Either way the **loss rate is reported next to the mean**, never omitted.
-- The result will **not** be re-run with a tuned prompt to reverse it. If a
-  prompt improvement is attempted later it will appear as a separate, labelled
-  run alongside the original, not in place of it.
+## The run that was discarded, and why it matters
 
-## A caveat that applies whichever way it goes
+**An earlier run of this exact experiment produced the opposite answer.** It
+reported the LLM agent *losing* by Rs 42,597 with a confidence interval
+excluding zero, on the same 120 seeds and the same code.
 
-Both agent arms are currently handicapped by the same harness limitation: a
-nudge schedules its follow-up debit at a fixed offset and default hour,
-discarding the slot the scheduler would have chosen (see `PROGRESS.md`,
-commits 20 and 25). Because it affects both arms identically the head-to-head
-remains internally valid, but both are understated against the fixed-schedule
-baseline. That should be fixed before any of these numbers are published as a
-claim about what an agent can do.
+It was wrong because the cache was only 47% covered by call volume. Every
+missing prompt raised a fallback, so **65% of the LLM arm's decisions were
+actually heuristic decisions** — the arm was mostly its own control, and the
+small genuine LLM contribution was swamped.
+
+The cause was a flaw in the warming script rather than in the agent. The
+prompt set was enumerated by replaying the experiment against *canned* replies
+(always "send a nudge"). But what the agent asks depends on what it was told a
+moment ago: a nudge leads to a different next situation, and a different next
+question, than a silent retry. So the enumeration described the prompt set of
+a **different policy**, and warming it covered 216 prompts that answered fewer
+than half the real run's calls.
+
+The fix was to make warming iterative — replay against the *real* cache,
+record what misses, warm it, repeat. It converged in five rounds:
+
+| Round | Call coverage | New prompts |
+| --- | ---: | ---: |
+| 1 | 46.9% | 181 |
+| 2 | 99.0% | 16 |
+| 3 | 99.96% | 13 |
+| 4 | 100.0% | 1 |
+| 5 | **100.0%** | **0 — converged** |
+
+444 cached entries, ~298,000 tokens, all committed to this repository.
+
+**Two things follow from this that are worth more than the result itself.**
+First, a partially-cached LLM arm does not fail loudly — it quietly becomes
+its control and returns a confident, wrong, statistically significant answer.
+Second, the discipline of refusing to report the first run was what made the
+correct answer reachable. Had it been published, this document would say the
+opposite with the same apparent rigour.
+
+## Caveats
+
+- **The whole world is unsourced.** All 22 calibrated parameters are
+  assumptions. This result is conditional on a simulator nobody has validated
+  against reality.
+- **The sensitivity sweep covers the heuristic, not this agent.** The sweep at
+  commit 27 ran before the ablation, when no arm had won. Sweeping the LLM
+  agent would need cache warming across all 54 regimes, since each regime
+  produces different observations and therefore different prompts. Until that
+  is done, **there is no evidence this advantage survives a different world** —
+  and the heuristic's advantage survived only 37% of regimes.
+- **The nudge follow-up still ignores the scheduler**, which handicaps both
+  agent arms identically. The comparison holds; both are understated against
+  the baseline.
+- One model, one provider, one temperature. Nothing here says the result
+  generalises to another model.
+- The agent's restraint may be an artefact of the prompt stating the churn
+  economics explicitly. A prompt that omitted them would likely nudge more and
+  score worse. That is prompt design doing real work, and it should be
+  reported as part of the system rather than as a property of the model.
