@@ -1192,3 +1192,40 @@ the contradiction case. `DiagnosisRouter.stats()` exposes
   `pyproject.toml` entry before anyone installs a wheel.
 - 504 is the grid maximum. The real distinct-prompt count will be lower and
   is measured at commit 26.
+
+---
+
+## Commit 23 — Intervention proposal with deterministic execution
+
+**Done:** `llm/intervention.py` asks the model for a *kind* of action and a
+*rough* timing preference, then deterministic code computes the slot, the
+amount and the rail, and the validator approves or refuses. Prompt versioned
+at `prompts/intervention.md`. `tests/llm/test_intervention.py` adds 23 tests;
+suite is 467 green.
+
+**Decisions:**
+- **The reply schema is the enforcement.** `InterventionReply` has exactly
+  four fields — `action`, `timing`, `tone_level`, `reasoning` — and a test
+  asserts no `amount`, `day`, `hour`, `rail` or `slot` can appear. The model
+  literally cannot name a rupee figure or a time slot, so invariant 6 is a
+  property of the type rather than a rule someone has to remember.
+- A partial collection's amount is the **largest sum this customer has
+  actually settled**, computed from the observation, never proposed. It is the
+  only figure with evidence behind it.
+- The timing preference becomes a *search window* for the existing scheduler
+  (`SOON` -> 3 days, `AFTER_NEXT_SALARY` -> 16), so the payday prior still
+  does the work and the restricted window is still a hard exclusion.
+- The prompt states the churn economics explicitly — a contact costs roughly a
+  tenth of the mandate's remaining value, a silent retry costs almost nothing.
+  Without that the model nudges constantly, which commit 20 showed is
+  value-destroying.
+- `ProposedIntervention` keeps both the proposed and the executed action, so
+  the audit trail can show a refusal rather than only its outcome.
+- This arrangement is also the honest answer to prompt injection: a reply
+  saying "collect ten lakh immediately" parses into an enum member and meets a
+  function that cannot be argued with.
+
+**Open:**
+- The model never sees that a nudge will be *deferred* to 09:00; it proposes
+  and the validator queues it. Fine today, but if tone or channel ever depend
+  on send time the prompt needs to say so.
