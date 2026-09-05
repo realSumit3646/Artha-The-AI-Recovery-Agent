@@ -1645,3 +1645,60 @@ until this happened.
 `diagnose` are shared domain vocabulary and belong in their own module rather
 than inside a policy, which the llm layer then reaches back into. The lazy
 import removes the symptom; the layering inversion is still there.
+
+---
+
+## Provider switch — Gemini to Groq
+
+**Why:** Gemini's free tier allows **20 requests per day per model**; this
+experiment needs ~250-300 distinct calls. Groq's free tier allows **1,000
+requests and 200,000 tokens per day** on `openai/gpt-oss-120b`, one of three
+Groq models supporting strict constrained decoding against a JSON schema —
+the contract the client was already built around. Checked against Groq's own
+rate-limit and structured-output documentation, not from memory.
+
+At ~797 tokens per call, ~300 calls is ~239k tokens: **the binding constraint
+becomes tokens/day, not requests**, so warming takes one to two days rather
+than Gemini's fifteen.
+
+**Done:** `LLMClient` gained a `provider` argument (`groq` default, `gemini`
+still supported), a Groq generation path, `strict_json_schema()`, and
+multi-key rotation. `tests/llm/test_client.py` adds 11 tests; suite is 560
+green.
+
+**Decisions:**
+- **The provider is already part of every cache key**, a choice made at commit
+  21 precisely because this project had switched providers once before. The 17
+  warmed Gemini entries become inert rather than colliding, and no stored
+  result can be served from the wrong model.
+- **`strict_json_schema()` rewrites pydantic's output rather than changing the
+  models.** Strict mode requires every property in `required` and
+  `additionalProperties: false`; pydantic emits neither for a field with a
+  default, so `InterventionReply.tone_level` would have been rejected.
+  Dropping defaults across the project to suit one provider would have been
+  the wrong direction of change.
+- **Quota errors rotate the key; other errors retry it.** Retrying a key that
+  is already out of quota just burns the backoff. Rotation stops at the last
+  key rather than looping.
+- **The determinism note in the client docstring was rewritten.** Gemini 2.5
+  Flash was verified byte-identical at temperature 0; Groq batches and makes
+  no such guarantee. That is acceptable *because the cache is committed* —
+  reproducibility lives in the cache, not in the model, and a stored
+  experiment replays identically either way. Invariant 5 is satisfied at the
+  experiment level, and the docstring now says so rather than implying the
+  model is deterministic.
+
+**A bug this introduced and immediately fixed:** the first patch attempt
+failed to apply because of a shell quoting error, but a *previous* patch in
+the same batch had landed — leaving `Sequence` and `key_rotations` referenced
+without being imported or declared. `from __future__ import annotations` made
+the type annotation lazy, so the module still imported and only `_rotate_key`
+would have failed at runtime. Caught by checking the file rather than
+trusting the "applied" message.
+
+**Open:**
+- `gpt-oss-120b` is a different model family from `gemini-2.5-flash`. This is
+  a provider *and* model change. It does not affect the ablation, which
+  compares heuristic against LLM rather than model against model, but the
+  write-up must name the model that produced the result.
+- Waiting on keys before the cache can be warmed.

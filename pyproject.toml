@@ -19,6 +19,7 @@ dependencies = [
     "typer",
     "python-dotenv",
     "google-genai",
+    "groq",
 ]
 
 [tool.setuptools.packages.find]

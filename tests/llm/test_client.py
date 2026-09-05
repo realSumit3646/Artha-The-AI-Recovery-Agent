@@ -16,11 +16,14 @@ from pydantic import BaseModel
 from mandate_recovery.llm.cache import ResponseCache, cache_key
 from mandate_recovery.llm.client import (
     DEFAULT_MODEL,
+    DEFAULT_PROVIDER,
+    GEMINI_MODEL,
     PROVIDER,
     TEMPERATURE,
     LLMClient,
     LLMFallback,
     StubClient,
+    strict_json_schema,
 )
 
 
@@ -79,8 +82,111 @@ def test_temperature_is_zero_and_not_configurable():
 
 def test_the_model_is_pinned_not_an_alias():
     """An alias silently changes the model under a stored result."""
-    assert DEFAULT_MODEL == "gemini-2.5-flash"
+    assert DEFAULT_MODEL == "openai/gpt-oss-120b"
     assert "latest" not in DEFAULT_MODEL
+    assert DEFAULT_PROVIDER == "groq"
+
+
+def test_groq_is_the_default_because_gemini_cannot_run_the_experiment():
+    """20 requests/day against ~300 distinct prompts is not a working tier."""
+    assert DEFAULT_PROVIDER == "groq"
+    assert GEMINI_MODEL == "gemini-2.5-flash"
+
+
+# --------------------------------------------------------------------------
+# Strict schemas, which is what Groq constrained decoding requires
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("model", [Reply])
+def test_strict_schema_marks_every_field_required(model):
+    """Pydantic omits fields with defaults from `required`; strict mode
+    rejects that, so the schema is rewritten rather than the models."""
+    schema = strict_json_schema(model)
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["additionalProperties"] is False
+
+
+def test_strict_schema_covers_every_reply_type_in_the_project():
+    from mandate_recovery.llm.diagnosis import DiagnosisReply
+    from mandate_recovery.llm.intervention import InterventionReply
+    from mandate_recovery.llm.messaging import MessageReply
+
+    for model in (DiagnosisReply, InterventionReply, MessageReply):
+        schema = strict_json_schema(model)
+        assert set(schema["required"]) == set(schema["properties"]), model
+        assert schema["additionalProperties"] is False, model
+
+
+def test_strict_schema_strips_defaults_and_ref_definitions():
+    """A `$ref` into removed `$defs` would dangle; a default is not a
+    constraint. Both are eliminated."""
+    import json
+
+    from mandate_recovery.llm.intervention import InterventionReply
+
+    rendered = json.dumps(strict_json_schema(InterventionReply))
+    assert "$defs" not in rendered
+    assert "$ref" not in rendered
+    assert '"default"' not in rendered
+
+
+def test_strict_schema_keeps_the_enum_that_stops_the_model_inventing_actions():
+    from mandate_recovery.llm.intervention import InterventionReply
+
+    schema = strict_json_schema(InterventionReply)
+    assert "RETRY_SILENT" in schema["properties"]["action"]["enum"]
+    assert "WIRE_TEN_LAKH" not in schema["properties"]["action"]["enum"]
+
+
+# --------------------------------------------------------------------------
+# Multiple keys
+# --------------------------------------------------------------------------
+
+
+def test_several_keys_are_accepted_and_rotated_in_order(tmp_path):
+    client = LLMClient(api_keys=["one", "two", "three"], cache_dir=tmp_path)
+    assert client.n_keys == 3
+    assert client._rotate_key() is True
+    assert client._rotate_key() is True
+    assert client._rotate_key() is False, "must not rotate past the last key"
+    assert client.counters.key_rotations == 2
+
+
+def test_a_quota_error_rotates_the_key_rather_than_retrying_it(tmp_path):
+    """Retrying an exhausted key just burns the backoff."""
+    client, transport = _client(
+        tmp_path, [Exception("429 rate limit reached"), VALID]
+    )
+    client._keys = ["first", "second"]
+    reply = client.complete("prompt", Reply)
+
+    assert reply.cause == "FUNDS"
+    assert client.counters.key_rotations == 1
+
+
+def test_a_non_quota_error_does_not_waste_a_key(tmp_path):
+    client, _ = _client(tmp_path, [ConnectionError("connection reset"), VALID])
+    client._keys = ["first", "second"]
+    client.complete("prompt", Reply)
+    assert client.counters.key_rotations == 0
+
+
+def test_running_out_of_keys_stops_early(tmp_path):
+    client, transport = _client(tmp_path, [Exception("429 quota")] * 9)
+    client._keys = ["only"]
+    with pytest.raises(LLMFallback):
+        client.complete("prompt", Reply)
+    assert transport.calls == 1, "should not retry once the only key is spent"
+
+
+def test_the_provider_defaults_come_from_the_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("GROQ_API_KEY", "a")
+    monkeypatch.setenv("GROQ_API_KEY_2", "b")
+    assert LLMClient(cache_dir=tmp_path).n_keys == 2
+
+    monkeypatch.delenv("GROQ_API_KEY_2")
+    assert LLMClient(cache_dir=tmp_path).n_keys == 1
 
 
 # --------------------------------------------------------------------------

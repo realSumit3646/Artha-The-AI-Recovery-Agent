@@ -33,31 +33,47 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Type, TypeVar
+from typing import Any, Sequence, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from .cache import DEFAULT_CACHE_DIR, ResponseCache, cache_key
 
 __all__ = [
+    "DEFAULT_PROVIDER",
     "DEFAULT_MODEL",
+    "GEMINI_MODEL",
     "PROVIDER",
+    "strict_json_schema",
     "LLMFallback",
     "LLMCounters",
     "LLMClient",
     "StubClient",
 ]
 
-#: Pinned, not an alias. Verified deterministic at temperature 0.
-DEFAULT_MODEL = "gemini-2.5-flash"
+#: Groq, because it is the only free tier that can actually run this
+#: experiment: 1,000 requests and 200,000 tokens per day against Gemini's 20
+#: requests per day. `gpt-oss-120b` is one of the three Groq models supporting
+#: strict constrained decoding against a JSON schema, which is the contract
+#: this client is built around. Pinned, never an alias.
+DEFAULT_PROVIDER = "groq"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 
-PROVIDER = "google-genai"
+#: The provider this project started on. Still supported, still quota-blocked.
+GEMINI_MODEL = "gemini-2.5-flash"
+
+#: Kept for the cache key of entries written before the provider switch.
+PROVIDER = DEFAULT_PROVIDER
 
 #: Never configurable. See the module docstring.
 TEMPERATURE = 0.0
 
 MAX_RETRIES = 2
 BACKOFF_SECONDS = 1.5
+
+#: Errors that mean "this key is out of quota" rather than "this call failed".
+#: Rotating to another key is worth trying; retrying the same one is not.
+_QUOTA_MARKERS = ("429", "rate limit", "rate_limit", "resource_exhausted", "quota")
 
 ReplyT = TypeVar("ReplyT", bound=BaseModel)
 
@@ -82,6 +98,7 @@ class LLMCounters:
     transport_failures: int = 0
     fallbacks_triggered: int = 0
     retries: int = 0
+    key_rotations: int = 0
     total_tokens: int = 0
 
     def as_dict(self) -> dict[str, int]:
@@ -99,24 +116,63 @@ class LLMClient:
         self,
         model: str = DEFAULT_MODEL,
         *,
+        provider: str = DEFAULT_PROVIDER,
         cache_dir: Path | str = DEFAULT_CACHE_DIR,
         api_key: str | None = None,
+        api_keys: Sequence[str] | None = None,
         offline: bool = False,
         max_retries: int = MAX_RETRIES,
     ) -> None:
         """
         Args:
+            provider: ``"groq"`` or ``"gemini"``. Part of the cache key, so a
+                switch cannot collide with entries written by the other.
+            api_keys: several keys to rotate through. A daily token cap is per
+                account, so two keys on *different* accounts double the
+                allowance; two on the same account do not. On a quota error
+                the client moves to the next key rather than retrying one that
+                is already exhausted.
             offline: serve only from cache. A cache miss raises
                 :class:`LLMFallback` rather than reaching the network, which
                 is what ``make reproduce`` runs so a reviewer needs no key.
         """
         self.model = model
+        self.provider = provider
         self.cache = ResponseCache(cache_dir)
         self.counters = LLMCounters()
         self._offline = offline
         self._max_retries = max_retries
-        self._api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        self._keys = self._resolve_keys(provider, api_key, api_keys)
+        self._key_index = 0
         self._client: Any = None
+
+    @staticmethod
+    def _resolve_keys(
+        provider: str, api_key: str | None, api_keys: Sequence[str] | None
+    ) -> list[str]:
+        if api_keys:
+            return [key for key in api_keys if key]
+        if api_key:
+            return [api_key]
+        names = (
+            ("GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3")
+            if provider == "groq"
+            else ("GEMINI_API_KEY",)
+        )
+        return [os.environ[name] for name in names if os.environ.get(name)]
+
+    @property
+    def n_keys(self) -> int:
+        return len(self._keys)
+
+    def _rotate_key(self) -> bool:
+        """Move to the next key. Returns False when they are all exhausted."""
+        if self._key_index + 1 >= len(self._keys):
+            return False
+        self._key_index += 1
+        self._client = None
+        self.counters.key_rotations += 1
+        return True
 
     @property
     def offline(self) -> bool:
@@ -124,13 +180,21 @@ class LLMClient:
 
     def _ensure_client(self) -> Any:
         if self._client is None:
-            if not self._api_key:
+            if not self._keys:
                 raise LLMFallback(
-                    "no GEMINI_API_KEY is set and the response was not cached"
+                    f"no API key is set for provider {self.provider!r} and the "
+                    "response was not cached"
                 )
-            from google import genai  # imported lazily: offline runs need no SDK
+            key = self._keys[self._key_index]
+            # Imported lazily: an offline run needs no SDK at all.
+            if self.provider == "groq":
+                from groq import Groq
 
-            self._client = genai.Client(api_key=self._api_key)
+                self._client = Groq(api_key=key)
+            else:
+                from google import genai
+
+                self._client = genai.Client(api_key=key)
         return self._client
 
     # ------------------------------------------------------------------
@@ -148,7 +212,7 @@ class LLMClient:
             LLMFallback: on a cache miss while offline, on transport failure
                 after retries, or when the reply will not validate.
         """
-        key = cache_key(PROVIDER, self.model, prompt, schema.__name__)
+        key = cache_key(self.provider, self.model, prompt, schema.__name__)
 
         cached = self.cache.get(key)
         if cached is not None:
@@ -177,6 +241,10 @@ class LLMClient:
             except Exception as error:  # noqa: BLE001 - transport is opaque
                 self.counters.transport_failures += 1
                 last_error = error
+                if any(m in str(error).lower() for m in _QUOTA_MARKERS):
+                    # Retrying an exhausted key just burns the backoff.
+                    if not self._rotate_key():
+                        break
                 continue
 
             self.counters.calls_made += 1
@@ -191,7 +259,7 @@ class LLMClient:
                 key,
                 raw,
                 {
-                    "provider": PROVIDER,
+                    "provider": self.provider,
                     "model": self.model,
                     "schema": schema.__name__,
                     "prompt": prompt,
@@ -206,6 +274,42 @@ class LLMClient:
         ) from last_error
 
     def _generate(
+        self, prompt: str, schema: Type[ReplyT], system_instruction: str | None
+    ) -> str:
+        if self.provider == "groq":
+            return self._generate_groq(prompt, schema, system_instruction)
+        return self._generate_gemini(prompt, schema, system_instruction)
+
+    def _generate_groq(
+        self, prompt: str, schema: Type[ReplyT], system_instruction: str | None
+    ) -> str:
+        client = self._ensure_client()
+        messages = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": prompt})
+
+        response = client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=TEMPERATURE,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.__name__,
+                    "schema": strict_json_schema(schema),
+                    "strict": True,
+                },
+            },
+        )
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            self.counters.total_tokens += int(
+                (usage.prompt_tokens or 0) + (usage.completion_tokens or 0)
+            )
+        return response.choices[0].message.content
+
+    def _generate_gemini(
         self, prompt: str, schema: Type[ReplyT], system_instruction: str | None
     ) -> str:
         from google.genai import types
@@ -273,3 +377,37 @@ class StubClient:
 
     def stats(self) -> dict[str, Any]:
         return {**self.counters.as_dict(), "cache": {"entries": 0}}
+
+
+def strict_json_schema(model: Type[BaseModel]) -> dict[str, Any]:
+    """A pydantic model as a schema Groq constrained decoding will accept.
+
+    Strict mode demands every property appear in ``required`` and every object
+    carry ``additionalProperties: false``. Pydantic emits neither for a field
+    with a default, so a schema that reads fine as documentation is rejected
+    as a constraint. Rewriting it here is better than asking every model in
+    the project to drop its defaults for one provider's benefit.
+    """
+    schema = model.model_json_schema()
+    definitions = schema.pop("$defs", {})
+
+    def tighten(node: Any) -> Any:
+        if isinstance(node, list):
+            return [tighten(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+
+        reference = node.get("$ref")
+        if reference and reference.startswith("#/$defs/"):
+            target = definitions.get(reference.split("/")[-1], {})
+            merged = {**target, **{k: v for k, v in node.items() if k != "$ref"}}
+            return tighten(merged)
+
+        node = {key: tighten(value) for key, value in node.items()}
+        if node.get("type") == "object" and "properties" in node:
+            node["additionalProperties"] = False
+            node["required"] = list(node["properties"])
+        node.pop("default", None)  # a default is a hint, not a constraint
+        return node
+
+    return tighten(schema)
