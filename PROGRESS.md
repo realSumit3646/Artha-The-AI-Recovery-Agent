@@ -1613,3 +1613,35 @@ that the deterministic agent **ties** the industry baseline and that its
 advantage survives about a third of plausible alternative worlds. The LLM arm
 is built, tested, and unmeasured. Every number is conditional on a calibration
 that is entirely made up and labelled as such on every row.
+
+---
+
+## Post-submission fix — circular import between `llm` and `policies`
+
+**Found by accident** while sizing the API cost, not by a test.
+`llm/diagnosis.py` imports the rule-based code book from
+`policies/heuristic.py`; `policies/__init__.py` imports `llm_agent`, which
+imported the llm stages at module scope. Importing `mandate_recovery.llm.*`
+**first** therefore raised `ImportError: cannot import name 'DiagnosisRouter'
+from partially initialized module`.
+
+It never surfaced because the test suite, the scripts and every earlier
+session all imported `policies` before `llm`. Anyone importing the model layer
+directly — which is exactly what a reviewer poking at `llm/diagnosis.py` would
+do — hit it immediately.
+
+**Fix:** the three llm imports in `llm_agent.py` moved into `__init__`, which
+breaks the cycle at module scope. **Regression test:**
+`tests/llm/test_imports.py` imports each of 22 modules *first* in a fresh
+interpreter via subprocess. That is the only way to catch an import-order bug,
+since a single test session fixes one order. Suite is 550 green.
+
+**Worth noting for the write-up:** a 528-test suite passed for four commits
+with a broken public import. Tests that share one interpreter cannot see
+import-order bugs, and I did not have a test that ran modules in isolation
+until this happened.
+
+**Better fix, not taken now:** `Diagnosis`, `DIAGNOSIS_CODE_BOOK` and
+`diagnose` are shared domain vocabulary and belong in their own module rather
+than inside a policy, which the llm layer then reaches back into. The lazy
+import removes the symptom; the layering inversion is still there.

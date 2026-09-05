@@ -31,9 +31,6 @@ from typing import ClassVar, Mapping
 from ..agent.scheduler import SchedulerConstraints
 from ..agent.validator import Budget, ComplianceLimits, Validator
 from ..calibration import DEFAULT_CALIBRATION, CalibrationSet
-from ..llm.diagnosis import DiagnosisRouter
-from ..llm.intervention import InterventionSelector
-from ..llm.messaging import MessageGenerator
 from ..types import Decision, Observation, SendNudge
 from .base import Policy
 from .heuristic import HeuristicPolicy
@@ -57,6 +54,14 @@ class LLMAgentPolicy(Policy):
         self._calibration = calibration
         self._constraints = constraints or SchedulerConstraints()
         self._validator = Validator(limits)
+
+        # Imported here rather than at module scope: `llm.diagnosis` imports
+        # the rule-based code book from `policies.heuristic`, so a top-level
+        # import would make `import mandate_recovery.llm.diagnosis` fail
+        # whenever it happened to be the first import of either package.
+        from ..llm.diagnosis import DiagnosisRouter
+        from ..llm.intervention import InterventionSelector
+        from ..llm.messaging import MessageGenerator
 
         self._router = DiagnosisRouter(client)
         self._selector = InterventionSelector(
