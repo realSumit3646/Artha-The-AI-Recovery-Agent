@@ -1103,3 +1103,50 @@ agent ties the industry baseline rather than beating it**, because the cost of
 contacting customers eats the value of better timing. The 23.0% UNKNOWN
 diagnosis rate is the argument for the LLM stage; the contact economics are
 the argument against using it to talk to people. Both go into the ablation.
+
+---
+
+## Commit 21 — Cached temperature-0 model client
+
+**Done:** `llm/client.py` wraps Gemini with temperature 0, a declared pydantic
+response schema on every call, two retries with exponential backoff, and
+`LLMFallback` for callers to catch. `llm/cache.py` is an on-disk cache keyed on
+`(provider, model, prompt, schema)`, committed to git so results reproduce
+without a key. `tests/llm/test_client.py` adds 27 tests, none of which touch
+the network. Suite is 421 green.
+
+**Decisions:**
+- **`gemini-2.5-flash`, pinned, never an alias.** Verified live: it returns
+  byte-identical output for a repeated prompt at temperature 0. The faster
+  flash-lite models were **not** deterministic on the same check, and
+  `gemini-flash-latest` is a moving target that would silently change the
+  model under a stored result. Two newer models returned 503 under load.
+- **Latency forces the cache to be load-bearing.** A call takes ~4.9s; the
+  heuristic run produced 112,063 failures of which 23% are residual, so a
+  naive implementation is ~35 hours per experiment. Prompts must therefore be
+  *canonical and bucketed* so thousands of observations collapse onto a few
+  hundred distinct prompts. That constraint is designed in from here, not
+  retrofitted at commit 26.
+- The provider is part of the cache key. This project switched providers
+  mid-build; without it a switch would silently mix two models' answers while
+  still looking reproducible.
+- A cached reply that no longer validates is treated as **stale and refetched**,
+  not as a schema failure. Schemas change during development; the cache
+  should not poison a run because of it.
+- `offline=True` serves only from cache and raises `LLMFallback` on a miss.
+  That is the mode `make reproduce` will use, so a reviewer with no key gets
+  either the recorded answer or a loud failure — never a silent live call.
+- Cache entries store the prompt alongside the response. A reviewer can read
+  what was asked without re-deriving it from a hash.
+- **The client does not disable certificate verification.** TLS-intercepting
+  security software on this machine breaks `google-genai`, which verifies
+  against certifi rather than the OS trust store. The fix is `SSL_CERT_FILE`
+  pointing at a bundle that includes the intercepting root — an environment
+  problem. Silently turning off verification in a payments codebase would be
+  worse than failing.
+
+**Open:**
+- The cache is empty. Warming it is part of commit 26, and the warming cost
+  is bounded by how well the bucketing works — which commit 22 has to get
+  right.
+- `total_tokens` is recorded but no cost-per-decision figure is derived yet.

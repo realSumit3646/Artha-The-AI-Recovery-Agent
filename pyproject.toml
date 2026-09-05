@@ -18,6 +18,7 @@ dependencies = [
     "matplotlib",
     "typer",
     "python-dotenv",
+    "google-genai",
 ]
 
 [tool.setuptools.packages.find]
