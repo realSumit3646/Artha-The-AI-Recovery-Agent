@@ -1,0 +1,33 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Simulator freeze check
+        # Run first and on its own: if the world moved, every number in the
+        # repository is stale and that is the most important thing to learn.
+        run: python -m pytest tests/sim/test_freeze.py -q
+
+      - name: Test suite
+        run: python -m pytest -q
+
+      - name: Syntax check
+        run: python -m compileall -q src tests scripts

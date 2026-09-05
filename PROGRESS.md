@@ -1443,3 +1443,39 @@ all of it. Suite is 528 green.
 **Open:**
 - The README quotes numbers from three result directories. Commit 33 verifies
   each one traces to a file in `results/`.
+
+---
+
+## Commit 31 — One-command reproduction and CI
+
+**Done:** `scripts/reproduce_all.py` runs every experiment from stored
+configuration and prints a headline summary; `make reproduce` invokes it;
+`.github/workflows/test.yml` runs the freeze check, the suite and a syntax
+check on every push.
+
+**Verified from a clean clone, which is the point of the commit.** Cloned into
+a temp directory, built a fresh Python 3.11 venv, `pip install -e .`, then:
+
+- 528 tests pass
+- every experiment reproduces with **identical numbers**: validation 29.2%
+  observed failure rate, heuristic vs fixed schedule Rs -15,265 with 63/120
+  seeds lost, sensitivity 20/54 regimes
+- total wall time **9m27s**, most of it the sensitivity sweep
+
+**Decisions:**
+- **The ablation is skipped by default and says why.** Running it against a
+  cold cache would produce an LLM arm that fell back to the heuristic on every
+  decision — a result that looks like a null finding rather than an absent
+  one. `--with-ablation` attempts it, and still refuses below 150 cached
+  responses. Silence would have been the easy option and the wrong one.
+- The CI runs the **freeze check first and on its own**. If the world moved,
+  every number in the repository is stale, and that is the most important
+  thing a failing build can tell you.
+- The summary printer ends by stating that every number above is conditional
+  on an unsourced calibration. A reproduction script that prints results
+  without that line invites them to be quoted alone.
+
+**Open:**
+- `make` is not installed on the development machine, so the Makefile targets
+  themselves are unverified here; `python scripts/reproduce_all.py` is what
+  was actually run end to end. CI exercises the same commands directly.
