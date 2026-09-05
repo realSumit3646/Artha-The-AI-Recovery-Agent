@@ -1307,3 +1307,49 @@ for every mandate. Not "similar". Identical.
   number is published.
 - The agent has no memory across decisions within a cycle beyond what the
   observation carries, so it cannot notice it already tried something.
+
+---
+
+## Commit 26 — Ablation machinery; the experiment is BLOCKED on API quota
+
+**Done:** `scripts/run_ablation.py` runs all five arms on the same 120 seeds,
+with `--offline` to reproduce from the committed cache. `figures.py` gained
+`llm_invocation_rate` and `llm_reliability`. `docs/ABLATION.md` documents the
+design, the blocker, and — written *before* the number is known — how the
+result will be reported whichever way it goes. Suite is 528 green.
+
+**THE ABLATION HAS NOT RUN. There is no result, and none is recorded.**
+
+**What happened:** the Gemini free tier allows **20 requests per day per model
+per project** (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, quota
+value 20). The experiment needs roughly 250-300 distinct calls to warm its
+cache. A live attempt warmed **17 entries** — those are committed — and then
+every subsequent call returned `429 RESOURCE_EXHAUSTED`. Retries exhausted,
+`LLMFallback` fired, and the LLM agent fell back to the heuristic on every
+decision.
+
+**The run was stopped and discarded rather than recorded.** It would have
+produced an `llm_agent` arm numerically identical to `heuristic` and an
+ablation that measured nothing while looking like a result. `write_experiment`
+was never reached, so no partial output exists.
+
+**Decisions:**
+- The bucketing did its job and it still is not enough: a measured 10-seed
+  run made **12,329 model calls collapsing onto 198 distinct prompts**, a 62x
+  reduction. The blocker is the quota, not the design.
+- Determinism is worth restating here: because the cache is committed, a
+  stored experiment is exactly reproducible *even if the model is not*. The
+  reproducibility guarantee lives in the cache, not in the model's behaviour.
+  That matters if a model with a larger free allowance turns out to be less
+  deterministic than `gemini-2.5-flash`.
+- `docs/ABLATION.md` states the reporting rules **before** the result exists —
+  loss rate always reported, no re-running with a tuned prompt to reverse an
+  answer. Committing to that in advance is the only time it is cheap.
+
+**Open — this is the blocking item:**
+- **Enable billing on the Google AI Studio project**, then run
+  `python scripts/run_ablation.py`. A few hundred calls and a few million
+  tokens is the whole cost. After that, `--offline` reproduces it with no key.
+- The nudge follow-up still ignores the scheduler. It handicaps both agent
+  arms identically so the head-to-head stays valid, but both are understated
+  against the baseline. Fix before publishing any number as a claim.

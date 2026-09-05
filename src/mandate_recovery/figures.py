@@ -43,6 +43,8 @@ __all__ = [
     "paired_delta_distribution",
     "diagnosis_coverage",
     "intervention_mix",
+    "llm_invocation_rate",
+    "llm_reliability",
 ]
 
 
@@ -571,4 +573,90 @@ def intervention_mix(counts_by_arm: Mapping[str, Mapping[str, int]]) -> plt.Figu
     axes.yaxis.set_major_formatter(lambda y, _: f"{y:.0%}")
     axes.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3)
     axes.grid(axis="x", visible=False)
+    return figure
+
+
+def llm_invocation_rate(
+    rule_resolved: int, llm_invoked: int, llm_resolved: int
+) -> plt.Figure:
+    """How much of the work the model actually did.
+
+    The evidence for the AI-judgement claim is not that a model was used; it
+    is that it was used *narrowly*, on the events rules could not settle.
+    """
+    total = rule_resolved + llm_invoked or 1
+    unresolved = llm_invoked - llm_resolved
+    segments = [
+        ("Resolved by rules", rule_resolved, PALETTE[7]),
+        ("Resolved by the model", llm_resolved, PALETTE[0]),
+        ("Still undetermined", unresolved, PALETTE[3]),
+    ]
+
+    figure, axes = plt.subplots(figsize=(9.0, 2.9))
+    left = 0.0
+    for label, value, colour in segments:
+        share = value / total
+        if share <= 0:
+            continue
+        axes.barh([""], [share], left=left, color=colour, height=0.55, label=label)
+        if share > 0.04:
+            axes.text(
+                left + share / 2,
+                0,
+                f"{share:.0%}",
+                ha="center",
+                va="center",
+                color="white" if colour != PALETTE[7] else _INK,
+                fontsize=12,
+                fontweight="bold",
+            )
+        left += share
+
+    axes.set_xlim(0, 1)
+    axes.set_xlabel("Share of all diagnosed failures")
+    axes.set_title(
+        f"The model was called on {llm_invoked / total:.0%} of failures"
+    )
+    axes.xaxis.set_major_formatter(lambda x, _: f"{x:.0%}")
+    axes.set_yticks([])
+    axes.grid(visible=False)
+    axes.legend(loc="upper center", bbox_to_anchor=(0.5, -0.35), ncol=3)
+    return figure
+
+
+def llm_reliability(counters: Mapping[str, float]) -> plt.Figure:
+    """Schema failures, fallbacks and cache hits — what actually went wrong."""
+    rows = [
+        ("Cache hits", counters.get("cache_hits", 0), PALETTE[2]),
+        ("Live calls", counters.get("calls_made", 0), PALETTE[0]),
+        ("Retries", counters.get("retries", 0), PALETTE[1]),
+        ("Schema failures", counters.get("schema_failures", 0), PALETTE[3]),
+        ("Transport failures", counters.get("transport_failures", 0), PALETTE[4]),
+        ("Stage fallbacks", counters.get("stage_fallbacks", 0), PALETTE[7]),
+        ("Message fallbacks", counters.get("message_fallbacks", 0), PALETTE[5]),
+    ]
+    rows = [row for row in rows if row[1] > 0] or rows[:2]
+    rows.sort(key=lambda row: row[1])
+
+    figure, axes = plt.subplots(figsize=(9.0, 4.6))
+    bars = axes.barh(
+        [name for name, _, _ in rows],
+        [value for _, value, _ in rows],
+        color=[colour for _, _, colour in rows],
+        height=0.62,
+    )
+    largest = max(value for _, value, _ in rows) or 1
+    for bar, (_, value, _) in zip(bars, rows):
+        axes.text(
+            value + largest * 0.015,
+            bar.get_y() + bar.get_height() / 2,
+            f"{int(value):,}",
+            va="center",
+            fontsize=11,
+        )
+
+    axes.set_xlabel("Events across the whole experiment (log scale)")
+    axes.set_xscale("symlog")
+    axes.set_title("Model layer reliability")
+    axes.grid(axis="y", visible=False)
     return figure
