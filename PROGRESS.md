@@ -1518,3 +1518,98 @@ curated figures. Suite is 528 green.
 - The audit trail is reconstructed by replaying a seed rather than read from a
   stored run, because nothing wires `AuditLog` into the harness yet. Same
   decisions, same rationales, but it re-simulates for ~20 seconds first.
+
+---
+
+## Commit 33 — Final verification pass
+
+**Verified, not assumed:**
+
+| Check | Result |
+| --- | --- |
+| `SIMULATOR_HASH` unchanged since commit 8 | `fd5a8fed...b9b31b193`, **bit-identical** to the value committed at the freeze |
+| Every README claim traces to `results/` | **15/15** located and matched against stored `metrics.json` |
+| No API key, `.env` or credential committed | none tracked; key prefix absent from all history |
+| Figures complete | every `results/` figure has PNG + SVG + caption; 13 results figures, 6 curated |
+| Clean-clone reproduction | fresh venv, `pip install -e .`, 528 tests, all experiments identical, **9m27s** |
+| Ablation directory absent | correct — README says NOT RUN |
+
+Tagged `v1.0-submission`.
+
+---
+
+# Problems I hit, and how I fixed them
+
+Drawn from the entries above. Ordered by how much they changed the outcome.
+
+**1. The contact path was completely dead, and fixing it made the agent
+worse.** The first heuristic run reported `contacts_per_recovery = 0.000` with
+20,366 validator refusals. The scheduler retries at 04:00-06:00 to catch
+balances before the day's spending, so every nudge decision landed outside the
+09:00-21:00 contact window and was refused. A real collector queues the
+message for business hours, so `SendNudge` gained a `send_hour` and the
+validator now *defers* rather than refuses. The agent then went from +Rs
+308,679 against the baseline to **-Rs 15,265**, because contact genuinely
+costs more than it recovers. Both numbers are recorded. I did not tune it
+back.
+
+**2. The calibration contradicted itself.** The bank-availability placeholders
+implied a 3.9% technical-decline rate while the failure mix demanded 7.5%; no
+reading made both true. Availability was refitted and `docs/CALIBRATION.md`
+now states which numbers were treated as targets and which absorbed the fit —
+including that availability is the weakest link, because NPCI actually
+publishes that one.
+
+**3. Mandates were settling permanently on first success**, so no customer
+ever accumulated payment history and `max_historical_success_amount_paise` was
+always zero — which would have made commit 6's contradiction cases
+undiagnosable by construction. Mandates now run real monthly cycles.
+
+**4. The sensitivity sweep falsified a claim I had already written.** In 100%
+of cells, `window=none` and `window=calibrated` produced identical deltas: the
+NPCI window never binds, because neither arm ever presents inside it. An
+earlier write-up and a figure caption attributed part of the agent's edge to
+window timing. Both were corrected, and the video script has a
+"phrases to avoid" list so it is not repeated on camera.
+
+**5. The Gemini free tier allows 20 requests per day per model.** The ablation
+needs ~250-300 distinct calls even after bucketing collapsed 12,329 calls onto
+198 prompts. A live run warmed 17 entries, then every call 429'd and the LLM
+agent fell back to the heuristic on every decision. **Discarded rather than
+recorded** — an arm that is silently the control looks like a null result
+instead of an absent one.
+
+**6. TLS-intercepting antivirus broke every network call.** `pip` and
+`google-genai` both verify against certifi rather than the Windows trust
+store. Fixed with `--use-feature=truststore` for pip and `SSL_CERT_FILE` for
+the SDK. The client does **not** disable verification; silently turning it off
+in a payments codebase would be worse than failing.
+
+**7. Smaller bugs my own tests caught.** An observed payday was boosted
+*multiplicatively* off a tiny prior, so "this customer pays on the 15th" could
+never overturn the population average. The validator counted only the last of
+two corrections when both fired. A prompt-leak test flagged the prompt's own
+sentence saying "you do not have the customer's balance" — rewritten to check
+latent *values* against a real seeded world instead of latent words.
+
+**8. What I would do next, in order.** Fix the nudge follow-up so it uses the
+scheduler instead of a fixed offset — it handicaps both agent arms and is the
+largest known understatement in the results. Run the ablation on a paid key.
+Move the fitted mandate parameters into `CalibrationSet` so the freeze covers
+them. Then replace the calibration with real figures, starting with the
+response-code distribution, which is the single input that decides whether
+this project's central question has a model-shaped answer at all.
+
+---
+
+### The submission, in one paragraph
+
+A frozen, validated simulator of UPI Autopay failures; an information boundary
+enforced by types and four separate tests; five policy arms compared on
+bit-identical paired worlds; a cost model that makes intervention expensive
+enough to be a real choice; a compliance validator no model can bypass; and a
+sensitivity sweep that says where the result stops holding. The headline is
+that the deterministic agent **ties** the industry baseline and that its
+advantage survives about a third of plausible alternative worlds. The LLM arm
+is built, tested, and unmeasured. Every number is conditional on a calibration
+that is entirely made up and labelled as such on every row.
