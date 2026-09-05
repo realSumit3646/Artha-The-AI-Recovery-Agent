@@ -1269,3 +1269,41 @@ suite is 511 green.
   and factually exact; nothing here says it is idiomatic or persuasive, and
   the experiment measures recovery rather than message quality.
 - A single merchant name is hardcoded as a default. Fine for one experiment.
+
+---
+
+## Commit 25 — Assembled LLM agent with a deterministic floor
+
+**Done:** `policies/llm_agent.py` composes detect -> diagnose (rules, model on
+residual) -> propose (model) -> schedule -> validate -> message -> audit.
+Every stage that can fail hands the whole decision to the heuristic agent.
+`tests/policies/test_llm_agent.py` adds 14 tests; suite is 525 green.
+
+**The resilience proof, and it is exact:** with a client that always raises,
+this agent returns decisions **identical** to `HeuristicPolicy` — tested
+across 84 observation shapes, and again at experiment level where a 60-mandate
+run produces the same `net_recovery_paise`, `recovered_paise` and `attempts`
+for every mandate. Not "similar". Identical.
+
+**Decisions:**
+- **The fallback is total, not partial.** On any model failure the agent
+  returns `self._heuristic.decide(observation)` unchanged rather than
+  assembling a half-LLM decision. Partial fallbacks are how you get an arm
+  that is subtly neither thing and cannot be compared with either.
+- `decide()` catches bare `Exception` and falls back. Normally objectionable;
+  here the alternative is a 120-seed experiment dying on one bad minute from
+  an API, and the counter records that it happened.
+- Routing applies to **diagnosis only**. A code the rules resolve still goes
+  to the model for intervention selection, because choosing what to *do* is a
+  judgement call even when the cause is obvious.
+- A message-verification failure degrades the *wording* (static template) but
+  not the decision, and is counted separately from a stage fallback.
+
+**Open:**
+- **The nudge follow-up still ignores the scheduler** — flagged at commit 20
+  and not yet fixed. Both agent arms are handicapped by it *identically*, so
+  the head-to-head at commit 26 remains internally valid, but both are
+  understated against the baseline. This is the top item before any final
+  number is published.
+- The agent has no memory across decisions within a cycle beyond what the
+  observation carries, so it cannot notice it already tried something.

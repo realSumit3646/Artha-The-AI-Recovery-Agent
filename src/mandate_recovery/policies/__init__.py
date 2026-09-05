@@ -9,6 +9,7 @@ from .base import POLICY_REGISTRY, Policy
 from .do_nothing import DoNothingPolicy
 from .fixed_schedule import FixedSchedulePolicy
 from .heuristic import HeuristicPolicy
+from .llm_agent import LLMAgentPolicy
 from .oracle import OraclePolicy
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "DoNothingPolicy",
     "FixedSchedulePolicy",
     "HeuristicPolicy",
+    "LLMAgentPolicy",
     "OraclePolicy",
 ]
