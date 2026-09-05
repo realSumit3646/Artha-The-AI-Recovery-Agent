@@ -1150,3 +1150,45 @@ the network. Suite is 421 green.
   is bounded by how well the bucketing works — which commit 22 has to get
   right.
 - `total_tokens` is recorded but no cost-per-decision figure is derived yet.
+
+---
+
+## Commit 22 — Residual-routed diagnosis
+
+**Done:** `llm/diagnosis.py` runs the rule-based code book first and calls the
+model **only** on what it cannot resolve: generic codes, missing codes, and
+the contradiction case. `DiagnosisRouter.stats()` exposes
+`llm_invocation_rate` as a first-class metric. The prompt lives in
+`src/mandate_recovery/prompts/diagnosis.md` as a versioned file.
+`tests/llm/test_diagnosis.py` adds 23 tests; suite is 444 green.
+
+**Decisions:**
+- **The prompt is canonical and bucketed, and this is load-bearing.** Measured
+  over the full feature grid: 3,024 routed observations collapse onto **504
+  distinct prompts**, a 6x reduction, warming once in about 41 minutes and
+  free thereafter. Raw amounts would have made the cache useless and a
+  120-seed experiment a 35-hour job. `amount_vs_history` renders as "somewhat
+  larger than anything they have paid before" rather than "880000 against
+  500000" — and a test asserts two observations differing only in scale
+  produce the *same* prompt while the cases the diagnosis turns on still
+  produce *different* ones.
+- **The leak test checks latent values, not latent words.** The prompt
+  deliberately tells the model "you do not have the customer's bank balance,
+  their salary date, or their account limit" — good prompt design, and my
+  first test flagged it as a leak. It now builds observations from a real
+  seeded `World` and asserts no large latent number (balance, salary amount,
+  spend rate, ceiling) appears in the rendered string. Salary *day* is
+  excluded from the check because 1-31 collides with ordinary prose.
+- Below 0.55 confidence the model's answer is **discarded** and the failure is
+  treated as undiagnosed, with the discarded answer still written into the
+  rationale so a reader can see what was rejected and why.
+- An `LLMFallback` returns UNKNOWN from source `"fallback"`, distinct from a
+  low-confidence `"llm"` answer. The ablation needs to tell "the model was
+  unsure" apart from "the model was unreachable".
+
+**Open:**
+- Prompt `.md` files are not declared as package data, so a non-editable
+  install would not ship them. Fine for how this project runs; needs a
+  `pyproject.toml` entry before anyone installs a wheel.
+- 504 is the grid maximum. The real distinct-prompt count will be lower and
+  is measured at commit 26.
