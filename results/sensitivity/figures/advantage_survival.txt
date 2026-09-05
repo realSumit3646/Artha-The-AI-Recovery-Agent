@@ -1,0 +1,1 @@
+Every one of the 54 regimes, sorted by advantage. The agent is ahead in 20 of them (37%). A bounded, honest claim is what this figure supports: not that the agent always wins, but exactly where it does and does not.

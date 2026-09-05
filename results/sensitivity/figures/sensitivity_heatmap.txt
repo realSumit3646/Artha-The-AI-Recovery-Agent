@@ -1,0 +1,1 @@
+Mean per-seed advantage of the heuristic agent over the fixed schedule, averaged across the ceiling and availability axes. Green is an advantage, red is a loss. Note that the 'none' and 'calibrated' window columns are identical: neither arm ever presents a debit inside the calibrated NPCI window, so widening it is the only change that reaches them.

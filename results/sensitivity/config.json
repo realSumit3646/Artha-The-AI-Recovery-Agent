@@ -1,0 +1,47 @@
+{
+  "experiment_id": "sensitivity",
+  "written_at": "2026-09-05T04:34:57.300994+00:00",
+  "git_sha": "ad9511378c74430f4d0d1f7aca2d17551a9be35e",
+  "simulator_hash": "fd5a8fed4eaf5a6d719e9470a2978f93dfd2dccfe0fd2e59de65801b9b31b193",
+  "n_cells": 54,
+  "n_seeds_per_cell": 40,
+  "n_mandates": 250,
+  "n_days": 90,
+  "failure_regimes": {
+    "low": 0.55,
+    "calibrated": 1.0,
+    "high": 1.75
+  },
+  "funds_share_regimes": {
+    "low": 0.3,
+    "calibrated": 1.0,
+    "high": 4.0
+  },
+  "window_regimes": {
+    "none": [],
+    "calibrated": [
+      [
+        10,
+        13
+      ],
+      [
+        17,
+        21
+      ]
+    ],
+    "wide": [
+      [
+        8,
+        14
+      ],
+      [
+        16,
+        22
+      ]
+    ]
+  },
+  "availability_regimes": {
+    "degraded": 0.93,
+    "calibrated": 1.0
+  }
+}

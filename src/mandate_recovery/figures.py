@@ -45,6 +45,8 @@ __all__ = [
     "intervention_mix",
     "llm_invocation_rate",
     "llm_reliability",
+    "sensitivity_heatmap",
+    "advantage_survival",
 ]
 
 
@@ -659,4 +661,90 @@ def llm_reliability(counters: Mapping[str, float]) -> plt.Figure:
     axes.set_xscale("symlog")
     axes.set_title("Model layer reliability")
     axes.grid(axis="y", visible=False)
+    return figure
+
+
+def sensitivity_heatmap(
+    cells,
+    row_key: str,
+    column_key: str,
+    *,
+    value_key: str = "mean_delta_paise",
+    row_label: str = "",
+    column_label: str = "",
+) -> plt.Figure:
+    """Advantage over the baseline per grid cell, averaged over other axes.
+
+    Diverging around zero on purpose: the question is not how large the
+    advantage is, it is whether it is still positive. Red cells are regimes
+    where the agent loses.
+    """
+    rows = sorted({cell[row_key] for cell in cells}, key=str)
+    columns = sorted({cell[column_key] for cell in cells}, key=str)
+
+    grid = np.full((len(rows), len(columns)), np.nan)
+    for row_index, row in enumerate(rows):
+        for column_index, column in enumerate(columns):
+            matching = [
+                cell[value_key]
+                for cell in cells
+                if cell[row_key] == row and cell[column_key] == column
+            ]
+            if matching:
+                grid[row_index, column_index] = float(np.mean(matching)) / 100_000
+
+    limit = float(np.nanmax(np.abs(grid))) or 1.0
+    figure, axes = plt.subplots(figsize=(9.0, 5.0))
+    image = axes.imshow(
+        grid, cmap="RdYlGn", vmin=-limit, vmax=limit, aspect="auto"
+    )
+
+    for row_index in range(len(rows)):
+        for column_index in range(len(columns)):
+            value = grid[row_index, column_index]
+            if np.isnan(value):
+                continue
+            axes.text(
+                column_index,
+                row_index,
+                f"{value:+,.0f}k",
+                ha="center",
+                va="center",
+                fontsize=11,
+                color=_INK,
+            )
+
+    axes.set_xticks(range(len(columns)), [str(c) for c in columns])
+    axes.set_yticks(range(len(rows)), [str(r) for r in rows])
+    axes.set_xlabel(column_label or column_key)
+    axes.set_ylabel(row_label or row_key)
+    axes.set_title("Advantage over the fixed schedule, by regime")
+    axes.grid(visible=False)
+    bar = figure.colorbar(image, ax=axes)
+    bar.set_label("Mean per-seed delta (thousand rupees)")
+    return figure
+
+
+def advantage_survival(cells, *, value_key: str = "mean_delta_paise") -> plt.Figure:
+    """How much of the grid the advantage survives, and by how much.
+
+    A single bar chart of every cell, sorted, with zero marked. The share of
+    cells above zero is the honest headline; the shape says whether the
+    advantage is broad or concentrated.
+    """
+    values = sorted(cell[value_key] / 100_000 for cell in cells)
+    survived = sum(1 for value in values if value > 0)
+    colours = [PALETTE[2] if value > 0 else PALETTE[3] for value in values]
+
+    figure, axes = plt.subplots()
+    axes.bar(range(len(values)), values, color=colours, width=0.85)
+    axes.axhline(0, color=_INK, linewidth=1.2)
+
+    axes.set_xlabel("Grid cell, sorted by advantage")
+    axes.set_ylabel("Mean per-seed delta (thousand rupees)")
+    axes.set_title(
+        f"The advantage holds in {survived} of {len(values)} regimes "
+        f"({survived / len(values):.0%})"
+    )
+    axes.grid(axis="x", visible=False)
     return figure

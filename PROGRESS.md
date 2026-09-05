@@ -1353,3 +1353,58 @@ was never reached, so no partial output exists.
 - The nudge follow-up still ignores the scheduler. It handicaps both agent
   arms identically so the head-to-head stays valid, but both are understated
   against the baseline. Fix before publishing any number as a claim.
+
+---
+
+## Commit 27 — Sensitivity sweep: the advantage does not generalise
+
+**Done:** `scripts/run_sensitivity.py` runs a 54-cell grid — failure regime,
+funds-share regime, restricted-window width, bank availability — at 40 seeds
+per cell, heuristic against fixed schedule on paired worlds.
+`docs/SENSITIVITY.md` reports where the advantage holds and where it
+collapses. Suite is 528 green.
+
+**The result, which is unflattering and is reported as measured:**
+the advantage holds in **20 of 54 regimes (37%)**, and **40 of 54 cells have a
+CI excluding zero** — so most of the losses are as statistically solid as the
+wins. Best cell +118.1k (30% loss rate); worst cell **−337.7k at a 100% loss
+rate**.
+
+| Axis level | Mean delta | Holds in |
+| --- | ---: | ---: |
+| failure **low** | +24.7k | 72% |
+| failure **high** | −193.9k | 6% |
+| funds share **low** (tight ceiling) | −144.1k | 6% |
+| window wide | −11.9k | 56% |
+
+**Decisions:**
+- **The heuristic is swept, not "the winning agent".** There is no winner: the
+  ablation is blocked and the heuristic tied at commit 20. Sweeping the best
+  arm actually measured is the honest reading, and it reproduces without a key.
+- Each axis is moved by a **mechanical lever** — amount distribution, ceiling,
+  window width, uptime — never by editing the calibrated target it is
+  measured against. Editing the target would make the sweep circular.
+- Observed rates are recorded per cell so the axis labels are grounded in what
+  the simulator produced. The field is named
+  `observed_failure_rate_per_attempt` because it includes retries and is
+  therefore **not** comparable with the ~29% null-world rate from commit 7.
+
+**A finding about the experiment, and a correction to an earlier claim:**
+**the calibrated NPCI restricted window never binds.** In 100% of cells,
+`window=none` and `window=calibrated` produce identical deltas to the rupee.
+Neither arm ever presents inside 10-13 or 17-21: the baseline presents at
+09:00 (chosen at commit 11 so it would not be a strawman) and the agent
+retries at 04:00-09:00. Only the `wide` level reaches either.
+
+Consequences: the effective grid is **36 distinct regimes, not 54**; and the
+commit 20 write-up and my first figure caption were **wrong** to attribute
+part of the agent's edge to restricted-window timing. The caption is
+corrected and the claim must not appear in the README or the video. Where the
+agent has an edge it comes from the salary-cycle prior and from declining to
+retry failures that will not recover.
+
+**Open:**
+- The window axis is effectively binary. A sweep that actually exercised the
+  calibrated window would need an arm that presents during business hours.
+- 40 seeds per cell supports a mean and a rough interval, not fine
+  distinctions between adjacent cells.
