@@ -154,12 +154,16 @@ class LLMClient:
             return [key for key in api_keys if key]
         if api_key:
             return [api_key]
-        names = (
-            ("GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3")
-            if provider == "groq"
-            else ("GEMINI_API_KEY",)
-        )
-        return [os.environ[name] for name in names if os.environ.get(name)]
+        # Any variable starting with the provider's prefix, sorted by name, so
+        # GROQ_API_KEY, GROQ_API_KEY1, GROQ_API_KEY_2 and GROQ_KEY_B all work.
+        # Guessing one exact spelling and failing silently would be worse.
+        prefix = "GROQ_API_KEY" if provider == "groq" else "GEMINI_API_KEY"
+        found = {
+            name: value
+            for name, value in os.environ.items()
+            if name.startswith(prefix) and value.strip()
+        }
+        return [found[name] for name in sorted(found)]
 
     @property
     def n_keys(self) -> int:

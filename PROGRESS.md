@@ -1702,3 +1702,55 @@ trusting the "applied" message.
   compares heuristic against LLM rather than model against model, but the
   write-up must name the model that produced the result.
 - Waiting on keys before the cache can be warmed.
+
+---
+
+## Cache warming on Groq — 214 of 216 prompts
+
+**Keys:** both work; they are on the **same Groq account**. Verified
+empirically rather than assumed — a call on key 1 dropped the remaining-request
+header from 999 to 998 as seen by key 2. One shared pool, so a second key
+buys nothing. `LLMClient` now discovers any `GROQ_API_KEY*` variable rather
+than requiring one exact spelling.
+
+**The prompt set, enumerated without spending anything:** the full 120-seed
+ablation makes **304,721 model calls that collapse onto 216 distinct
+prompts** — a 1,411x reduction, and the reason this experiment is affordable
+at all.
+
+| Schema | Calls | Distinct | Calls per prompt |
+| --- | ---: | ---: | ---: |
+| DiagnosisReply | 34,885 | 27 | 1,292 |
+| InterventionReply | 150,948 | 180 | 839 |
+| MessageReply | 118,888 | **9** | **13,210** |
+
+**Warmed 195 entries, then the daily allowance ran out at 268,240 tokens** —
+comfortably past the 200,000/day the documentation states, so this account's
+limit differs. A second attempt added 2 more. **214 of 216 cached; 18 remain,
+about 16,000 tokens and three minutes once the allowance resets.**
+
+**A bug in my own warming script, found by measuring instead of assuming.**
+After the first run I checked what fraction of *calls* the cache would serve,
+rather than what fraction of *prompts* were warmed. 90% of prompts were
+cached — but **39% of calls were not**, because the script warmed in
+alphabetical schema order and never reached `MessageReply`. Those nine prompts
+are worth 13,210 calls each; an intervention prompt is worth 839. The
+allowance had been spent on the cheap ones.
+
+Running the ablation in that state would have produced an arm where 39% of
+model calls silently became heuristic decisions. Fixed: prompts are now warmed
+in descending order of the calls they serve.
+
+**Two further corrections:**
+- `ESTIMATED_TOKENS_PER_CALL` was 900; measurement said 1,400. The low
+  estimate paced requests at ~10,800 tokens/minute against an 8,000 limit, so
+  the run was partly sitting in its own 429s.
+- The script called every 429 a "daily allowance exhausted". A per-minute
+  throttle and a per-day exhaustion both arrive as 429; conflating them would
+  abandon a run that only needed to wait 60 seconds. They are now told apart
+  from the message text, and the provider's raw message is printed either way
+  rather than guessed at.
+
+**Next:** re-run `python scripts/warm_llm_cache.py` after the allowance
+resets, then `python scripts/run_ablation.py --offline` for a run with no
+possibility of partial fallback.
