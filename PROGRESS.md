@@ -1408,3 +1408,38 @@ retry failures that will not recover.
   calibrated window would need an arm that presents during business hours.
 - 40 seeds per cell supports a mean and a rough interval, not fine
   distinctions between adjacent cells.
+
+---
+
+## Commit 30 — Documentation
+
+**Done:** README rewritten around the actual results; `docs/ARCHITECTURE.md`
+explains the paired design, the four-layer boundary enforcement and the
+freeze, with mermaid diagrams; `docs/LIMITATIONS.md` names what is wrong with
+all of it. Suite is 528 green.
+
+**Decisions:**
+- **The README leads with the honest result, not the flattering one.** The
+  headline is that the deterministic agent *ties* the baseline and that its
+  advantage survives about a third of the sweep. The two things this project
+  does not claim — an unrun ablation and a fragile advantage — get their own
+  subsection above the fold rather than a footnote.
+- The problem statement **does not cite a failure figure**, because there is
+  no figure this project can stand behind. It says so and points at
+  `CALIBRATION.md`. The build plan asked for cited figures with a stated
+  range; the honest version of that instruction is to state that the range
+  exists and that none of it was used.
+- `LIMITATIONS.md` names **which conclusion is most at risk** — that
+  contacting customers is value-destroying — and why: it rests on one
+  unsourced churn increment multiplied by an assumed twelve-cycle lifetime.
+  A limitations section that does not rank its own risks is decoration.
+- The architecture diagram draws the observation boundary as a single-headed
+  arrow and the doc lists the four places it is enforced, since "we were
+  careful" is not an argument.
+- Commits 28 (FastAPI) and 29 (React UI) were **deliberately cut**, with
+  approval, per the build plan's own guidance on what to drop first. The
+  README says so rather than leaving them silently missing.
+
+**Open:**
+- The README quotes numbers from three result directories. Commit 33 verifies
+  each one traces to a file in `results/`.
