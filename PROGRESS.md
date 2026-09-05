@@ -1229,3 +1229,43 @@ suite is 467 green.
 - The model never sees that a nudge will be *deferred* to 09:00; it proposes
   and the validator queues it. Fine today, but if tone or channel ever depend
   on send time the prompt needs to say so.
+
+---
+
+## Commit 24 — Hinglish messaging with verified fact templating
+
+**Done:** `llm/messaging.py` generates the customer-facing nudge in Hinglish,
+tone-graded 1-3 by contacts already sent. Prompt versioned at
+`prompts/message_hinglish.md`. `tests/llm/test_messaging.py` adds 44 tests;
+suite is 511 green.
+
+**Decisions:**
+- **The model is never shown the amount, date, reference or merchant name.**
+  It writes a *template* containing four placeholders and Python substitutes
+  the true values afterwards. A model that cannot see a number cannot get one
+  wrong, which is a stronger guarantee than checking its arithmetic.
+- **The verifier's rule is absolute: no digits at all in the template.** Not
+  "no wrong digits" — none. "24 hours", "2 din", a phone number and an
+  invented rupee figure all fail identically, so there is no judgement call
+  and no partial credit. The prompt tells the model to write "kal" rather
+  than "24 hours".
+- Verification runs **twice**: on the template before substitution, and on the
+  rendered message after. The second pass checks every fact appears verbatim
+  and every digit run traces back to the fact set, which catches a
+  substitution bug as well as a model failure.
+- Forbidden language (legal action, recovery agent, CIBIL, defaulter,
+  blacklist) is rejected at every tone including tone 3. A final notice is a
+  firm business message, never a threat.
+- Verification failures and outages are counted **separately**. The
+  reliability figure needs to distinguish "the model wrote something wrong"
+  from "the model was unreachable"; they are different problems.
+- The static fallback is tested to pass its own verification at every tone —
+  a safety net that could itself be unsendable is not a safety net.
+- Because the model sees only tone and reason, the entire experiment needs
+  about a dozen distinct message prompts.
+
+**Open:**
+- Hinglish quality is unassessed. Verification proves the message is *safe*
+  and factually exact; nothing here says it is idiomatic or persuasive, and
+  the experiment measures recovery rather than message quality.
+- A single merchant name is hardcoded as a default. Fine for one experiment.
