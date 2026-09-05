@@ -1479,3 +1479,42 @@ a temp directory, built a fresh Python 3.11 venv, `pip install -e .`, then:
 - `make` is not installed on the development machine, so the Makefile targets
   themselves are unverified here; `python scripts/reproduce_all.py` is what
   was actually run end to end. CI exercises the same commands directly.
+
+---
+
+## Commit 32 — Video assets
+
+**Done:** `docs/video/SCRIPT.md` (5-minute script with timings),
+`docs/video/DEMO_NOTES.md` (exact seed, commands, terminal setup, numbers to
+have ready), `docs/video/demo_audit_trail.py` (the replay itself) and six
+curated figures. Suite is 528 green.
+
+**Decisions:**
+- **The demo is a terminal replay of one mandate's audit trail**, not a
+  dashboard, because the API and UI were cut. That turned out better: the
+  audit trail *is* the honesty evidence, and it reads more convincingly as
+  plain text than it would as a chart.
+- Curated on seed 7, mandate `m000147` — Rs 32,412 due on the 17th, five
+  decisions. Chosen by ranking every mandate on decision count, validator
+  refusals and code variety, then reading the top candidates. Verified
+  byte-identical across runs, so a retake never changes the output.
+- The two moments the notes tell you to pause on are the two that make the
+  architecture visible: the compliance gate deferring a 04:00 contact to
+  09:00, and the agent identifying the bank yet still refusing to be
+  confident because the customer has no settled payment to compare against.
+- **The script includes a "phrases to avoid" list.** It names the claim the
+  sensitivity sweep falsified — that the agent times around the NPCI window —
+  and the three other things that would be untrue if said on camera. The
+  easiest place to overclaim is out loud.
+- `DEMO_NOTES.md` carries an explicit warning not to use the
+  restricted-window figure as evidence of agent behaviour. It is real evidence
+  that the *simulator* works and would be the most misleading thing in the
+  repository if used the other way.
+- `demo_audit_trail.py` is a fourth file in `docs/video/`, beyond the three
+  listed. A 60-line snippet pasted from markdown is fragile to run live; a
+  real file is not.
+
+**Open:**
+- The audit trail is reconstructed by replaying a seed rather than read from a
+  stored run, because nothing wires `AuditLog` into the harness yet. Same
+  decisions, same rationales, but it re-simulates for ~20 seconds first.
